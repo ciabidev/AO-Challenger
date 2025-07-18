@@ -113,7 +113,8 @@ async def on_ready():
 
     print(f"Cached {len(thread_cache)} possible pvp channels/threads")
 
-
+    # remove all queue entries on start
+    await db.queue.delete_many({})
 # GLOBAL PVP THREAD RELAY
 # Host sends a message in host thread which is forwarded to all relay threads
 # If a player sends a message in a relay thread, it is forwarded to the host thread
