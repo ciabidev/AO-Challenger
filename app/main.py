@@ -994,6 +994,7 @@ async def queue_command(interaction: discord.Interaction, username: str, region:
                 })
                 searchingPlayer = await db.queue.find_one({"region": region, "username": username})
                 view = QueueView(searchingPlayer["_id"])
+                await interaction.response.send_message(f"✅ added `{username}` to the queue for pvp in {region}. Players you can be paired with will be limited to the region you selected.", ephemeral=True, view=view)
             else:
                 await db.queue.update_one({"user_id": int(interaction.user.id)}, { # prevents players from editing others queue
                     "$set": {
@@ -1008,7 +1009,6 @@ async def queue_command(interaction: discord.Interaction, username: str, region:
                 searchingPlayer = await db.queue.find_one({"region": region, "username": username})
                 view = QueueView(searchingPlayer["_id"])
                 await interaction.response.send_message(f"edited your queue for pvp")
-            await interaction.response.send_message(f"✅ added `{username}` to the queue for pvp in {region}. Players you can be paired with will be limited to the region you selected.", ephemeral=True, view=view)
             msg = await interaction.original_response()
             view.message = msg  
         else:
