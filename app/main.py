@@ -982,8 +982,8 @@ async def queue_command(interaction: discord.Interaction, username: str, region:
     try:
         user_exists = await roblox_user_exists(username)
         discord_user_already_in_queue = await db.queue.find_one({"user_id": int(interaction.user.id)})
-        if user_exists and not discord_user_already_in_queue:
-            if not searchingPlayer:
+        if user_exists:
+            if not searchingPlayer and not discord_user_already_in_queue:
                 await db.queue.insert_one({
                     "region": region,
                     "username": username,
