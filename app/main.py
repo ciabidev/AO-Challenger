@@ -836,6 +836,28 @@ class GlobalPVPCommands(app_commands.Group):
         await set_setting(interaction.guild.id, "regional_roles", current_roles)
         await interaction.response.send_message(f"✅ set regional role for {region} to {role.mention}", ephemeral=True)
     
+    @app_commands.command(name="sethostrole", description="set the role that can host pvp (everyone by default)")
+    @app_commands.describe(
+        role="role that will be able to host pvp",
+    )
+    @app_commands.checks.has_permissions(manage_roles=True)
+    async def sethostrole(
+        self,
+        interaction: discord.Interaction,
+        role: discord.Role,
+    ):
+        await set_setting(interaction.guild.id, "host_role", role.id)
+        await interaction.response.send_message(f"✅ set host role to {role.mention}", ephemeral=True)
+
+    @app_commands.command(name="clearhostrole", description="clear the host role")
+    @app_commands.checks.has_permissions(manage_roles=True)
+    async def clearhostrole(
+        self,
+        interaction: discord.Interaction,
+    ):
+        await set_setting(interaction.guild.id, "host_role", False)
+        await interaction.response.send_message(f"✅ cleared host role", ephemeral=True)
+        
 class QueueView(discord.ui.View):
     def __init__(self, searchingPlayer_id: str):  
         super().__init__(timeout=300)
