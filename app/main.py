@@ -68,7 +68,7 @@ async def roblox_user_exists(username: str) -> bool:
     url = "https://users.roblox.com/v1/usernames/users"
     data = {
         "usernames": [username],
-        "excludeBannedUsers": False
+        "excludeblockedUsers": False
     }
 
     async with aiohttp.ClientSession() as session:
@@ -86,7 +86,7 @@ async def get_roblox_user_id(username: str):
     url = "https://users.roblox.com/v1/usernames/users"
     data = {
         "usernames": [username],
-        "excludeBannedUsers": False
+        "excludeblockedUsers": False
     }
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=data) as resp:
@@ -115,6 +115,8 @@ async def get_roblox_headshot(user_id: int):
 
 
 # bot initialization
+
+# servers can block users from interacting with their server (such as /globalpvp ping), even if they are not in the server
 
 @bot.event
 async def on_ready():
@@ -147,12 +149,46 @@ async def on_ready():
 
     # remove all queue entries on start
     await db.queue.delete_many({})
+
 # GLOBAL PVP THREAD RELAY
 # Host sends a message in host thread which is forwarded to all relay threads
 # If a player sends a message in a relay thread, it is forwarded to the host thread
 
 thread_cache = {}  # global cache: {thread_id (int): discord.Thread or discord.TextChannel}
 
+async def get_blocked_users(guild_id: int):
+    cursor = db.blocks.find({"guild_id": guild_id})
+    blocked_users = await cursor.to_list()
+    userlist = []
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+
+    for user in blocked_users:
+        try:
+            created_at = datetime.datetime.fromisoformat(user["created_at"])
+            duration = user.get("duration", 0)
+
+            if now - created_at > datetime.timedelta(days=duration):
+                await db.blocks.delete_one({"username": user["username"], "guild_id": guild_id})
+            else:
+                userlist.append(user)
+
+        except KeyError as e:
+            print(f"Missing expected key in block record: {e}")
+
+    return userlist
+
+async def is_blocked_user(username: str, guild_id: int):
+    blocked_users = await get_blocked_users(guild_id)
+    print(blocked_users)
+    print(username)
+    for user in blocked_users: 
+        if user["username"] == username:
+            print(f"user {user} is blocked")
+            return True
+            break
+
+    return False
 
 
 
@@ -211,9 +247,11 @@ async def cooldown_timer(user_id):
 
 @bot.event
 async def on_message(message: discord.Message):
-    
+    await get_blocked_users(message.guild.id) # user activity automatically updates blocked users
     if message.author.bot:
         return
+    
+
     
     channel_id = int(message.channel.id)
     user_id = int(message.author.id)
@@ -269,6 +307,11 @@ async def on_message(message: discord.Message):
 
                     if message.channel.permissions_for(message.guild.me).manage_threads:
                         await asyncio.sleep(2)
+                        is_blocked = await is_blocked_user(message.author.name, relay_thread.guild.id)
+                        if is_blocked:
+                            await relay_thread.send(f"This host `{message.author.name}` is blocked from interacting with your server" 
+                                                    f"\n-# Please contact a server admin if you believe this is an error.")
+                            return
                         await relay_thread.send(f"👑 Host: {message.content}")
                         await relay_thread.edit(slowmode_delay=5)
                         await host_thread.edit(slowmode_delay=5)
@@ -288,6 +331,12 @@ async def on_message(message: discord.Message):
                     print("host channel found")
                     if message.channel.permissions_for(message.guild.me).manage_threads:
                         await asyncio.sleep(2)
+                        is_blocked = await is_blocked_user(message.author.name, host_thread.guild.id)
+                        if is_blocked:
+                            await host_thread.send(f"blocked message from `{message.author.name}`" 
+                                                   f"\n-# Please contact a server admin if you believe this is an error.")
+                            return
+
                         await host_thread.send(f"`{message.guild.name}` {message.author}: {message.content}")
                         await relay_thread.edit(slowmode_delay=5)
                         await host_thread.edit(slowmode_delay=5)
@@ -582,27 +631,7 @@ async def location_autocomplete(interaction: discord.Interaction, current: str):
         for loc in matches[:25]
     ]
 
-async def get_muted_users(guild_id: int):
-    cursor = db.mutes.find({"guild_id": guild_id})
-    muted_users = await cursor.to_list(length=None)
-    userlist = []
 
-    now = datetime.datetime.now(datetime.timezone.utc)
-
-    for user in muted_users:
-        try:
-            created_at = datetime.datetime.fromisoformat(user["created_at"])
-            duration = user.get("duration", 0)
-
-            if now - created_at > datetime.timedelta(days=duration):
-                await db.mutes.delete_one({"username": user["username"], "guild_id": guild_id})
-            else:
-                userlist.append(user["username"])
-
-        except KeyError as e:
-            print(f"Missing expected key in mute record: {e}")
-
-    return userlist
 
 
 class GlobalPVPCommands(app_commands.Group):
@@ -678,9 +707,10 @@ class GlobalPVPCommands(app_commands.Group):
 
                 # check if global pvp is enabled for this guild
                 global_pvp_enabled = await get_toggle(guild.id, "global_pvp_enabled")
-                muted_users = await get_muted_users(guild.id)
+                blocked_users = await get_blocked_users(guild.id)
+                is_blocked = await is_blocked_user(interaction.user.name, guild.id)
 
-                if muted_users and interaction.user.name in muted_users:
+                if is_blocked:
                     continue
 
                 global_pvp_channel_id = await get_setting(guild.id, "global_pvp_channel")
@@ -704,8 +734,6 @@ class GlobalPVPCommands(app_commands.Group):
                     f"{extra_text}"
                     f"\n-# TIP: Use `/globalpvp ping` to ping an entire region for pvp"
                 )
-
-                
 
                 sent_msg = await channel.send(messagecontent)
                 thread = await sent_msg.create_thread(
@@ -767,41 +795,120 @@ class GlobalPVPCommands(app_commands.Group):
                 ephemeral=True
             )
 
-    @app_commands.command(name="muteuser", description="Block a user’s global PvP pings in your server")
+    @app_commands.command(name="blockuser", description="Block a user from interacting with your server")
     @app_commands.describe(
-        username="Discord username",
-        duration="duration of the mute in days",
+        username="Discord Username, NOT Display Name",
+        duration="duration of the block in days",
     )
     @app_commands.checks.has_permissions(manage_channels=True)
-    async def muteuser(
+    async def blockuser(
         self,
         interaction: discord.Interaction,
         username: str,
         duration: int,
     ):
-        db.mutes.insert_one({
-            "username": str(username),
-            "guild_id": int(interaction.guild.id),
-            "duration": duration,
-            "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
-        })
+        confirmView = View()
 
-        await interaction.response.send_message(f"✅ muted {username} for {duration} days", ephemeral=True)
+        confirmButton = Button(label="Yes", style=ButtonStyle.success, custom_id="confirm")
+        cancelButton = Button(label="No", style=ButtonStyle.danger, custom_id="cancel")
 
-    @app_commands.command(name="unmuteuser", description="Unblock a user’s global PvP pings in your server")
+        # Add buttons to view
+        confirmView.add_item(confirmButton)
+        confirmView.add_item(cancelButton)
+
+        confirmEmbed = discord.Embed(
+            title="⚠️ Block User",
+            description=f"Are you sure you want to block `{username}` for {duration} day(s)? This will prevent them from \n - sending messages to your hosts \n - pinging your server for pvp \n - announcing to your guests \n - any more interactions with your server",
+            color=discord.Color.blue()
+        )
+        confirmEmbed.add_field(name="Username", value=username, inline=False)
+        confirmEmbed.add_field(name="Duration", value=f"{duration} day(s)", inline=False)
+        
+        # Send the message with buttons
+        # check if the user is already blocked
+        is_blocked = await is_blocked_user(username, interaction.guild.id)
+        if is_blocked:
+            await interaction.response.send_message(f"❌ User `{username}` is already blocked", ephemeral=True)
+            return
+        else:
+            await interaction.response.send_message(embed=confirmEmbed, view=confirmView, ephemeral=True)
+
+        # Wait for button interaction
+        def check(i: Interaction):
+            return i.user.id == interaction.user.id and i.data["custom_id"] in ["confirm", "cancel"]
+
+        try:
+            button_interaction = await interaction.client.wait_for("interaction", check=check, timeout=60)
+
+            if button_interaction.data["custom_id"] == "confirm":
+                await db.blocks.insert_one({
+                    "username": str(username),
+                    "guild_id": int(interaction.guild.id),
+                    "duration": duration,
+                    "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                })
+                await button_interaction.response.send_message(f"✅ {interaction.user.mention} blocked `{username}` for {duration} day(s)", ephemeral=True)
+            elif button_interaction.data["custom_id"] == "cancel":
+                await button_interaction.response.send_message(f"❌ Cancelled", ephemeral=True)
+
+        except asyncio.TimeoutError:
+            await interaction.followup.send("⏰ Timed out, no action taken.", ephemeral=True)
+        
+
+    @app_commands.command(name="unblockuser", description="Unblock a user from interacting with your server")
     @app_commands.describe(
         username="Discord username",
     )
     @app_commands.checks.has_permissions(manage_channels=True)
-    async def unmuteuser(
+    async def unblockuser(
         self,
         interaction: discord.Interaction,
         username: str,
     ):
-        db.mutes.delete_one({"username": str(username)})
-
-        await interaction.response.send_message(f"✅ unmuted {username}", ephemeral=True)
+        
+        # check if the user is already blocked
+        is_blocked = await is_blocked_user(username, interaction.guild.id)
+        if not is_blocked:
+            await interaction.response.send_message(f"❌ User `{username}` is not blocked", ephemeral=True)
+            return
+        else:
+            db.blocks.delete_one({"username": str(username)})
+            await interaction.response.send_message(f"✅ unblocked `{username}`")
     
+    @app_commands.command(name="listblocked", description="List all blocked users")
+    @app_commands.checks.has_permissions(manage_channels=True)
+    async def listblocked(
+        self,
+        interaction: discord.Interaction,
+    ):
+        blocked_users = await get_blocked_users(interaction.guild.id)
+        if not blocked_users:
+            await interaction.response.send_message(f"❌ No blocked users found", ephemeral=True)
+            return
+        
+        # list blocked users in an embed field table, with fields for username, duration, days left, created_at
+        blocked_users_embed = discord.Embed(
+            title="🔒 Blocked Users",
+            description=f"Use `/unblockuser` to unblock a user",
+            color=discord.Color.blue()
+        )
+        
+        for user in blocked_users:
+            created_dt = datetime.datetime.fromisoformat(user['created_at'])
+            unblock_dt = created_dt + datetime.timedelta(days=int(user['duration']))
+            unblock_ts = int(unblock_dt.timestamp())
+
+            info = (
+                f"- Duration: {user['duration']} day(s)\n"
+                f"- Blocked at: <t:{int(created_dt.timestamp())}:f>\n"
+                f"- 🔓 Unblocked: <t:{unblock_ts}:R>"
+            )
+
+
+            blocked_users_embed.add_field(name=user["username"], value=info, inline=False)
+        await interaction.response.send_message(embed=blocked_users_embed, ephemeral=True)
+        
+
     @app_commands.command(name="setchannel", description="set the global pvp channel")
     @app_commands.describe(
         channel="the channel to receive pings",
