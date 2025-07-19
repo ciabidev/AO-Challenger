@@ -78,9 +78,41 @@ async def roblox_user_exists(username: str) -> bool:
                 return False
             
             result = await resp.json()
-            return len(result.get("data", [])) > 0
+            ## return the username
+            print(result)
+            return result.get("data", [])[0].get("name")
 
-thread_cache = {}  # global cache: {thread_id (int): discord.Thread or discord.TextChannel}
+async def get_roblox_user_id(username: str):
+    url = "https://users.roblox.com/v1/usernames/users"
+    data = {
+        "usernames": [username],
+        "excludeBannedUsers": False
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=data) as resp:
+            if resp.status != 200:
+                print(f"Failed request: {resp.status}")
+                return False
+            
+            result = await resp.json()
+            ## return the id
+            print(result)
+            return result.get("data", [])[0].get("id")
+
+async def get_roblox_headshot(user_id: int):
+    url = f"https://thumbnails.roblox.com/v1/users/avatar-headshot"
+    params = {
+        "userIds": str(user_id),
+        "size": "150x150",
+        "format": "Png",
+        "isCircular": "false"
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, params=params) as response:
+            data = await response.json()
+            return data['data'][0]['imageUrl']
+        
+
 
 # bot initialization
 
@@ -119,6 +151,7 @@ async def on_ready():
 # Host sends a message in host thread which is forwarded to all relay threads
 # If a player sends a message in a relay thread, it is forwarded to the host thread
 
+thread_cache = {}  # global cache: {thread_id (int): discord.Thread or discord.TextChannel}
 
 
 
@@ -341,15 +374,16 @@ async def get_roles_as_options(guild_id: int) -> list[discord.SelectOption]:
     roles = guild.roles
     options = [
         discord.SelectOption(label=role.name, value=int(role.id))
-        for role in roles if not role.is_default()
+        for role in roles
     ]
     return options
 
 async def convert_list_to_options(guild_id: int, list: list[str]) -> list[discord.SelectOption]:
     guild = await get_guild_from_id(guild_id)
+    items = list
     options = [
-        discord.SelectOption(label=role.name, value=int(role.id))
-        for role in guild.roles if role.name in list
+        discord.SelectOption(label=item.name, value=int(item.id))
+        for item in items
     ]
     return options
     
@@ -382,12 +416,7 @@ class GlobalChannelSelect(Select):
         self.parentview = parentview
         
     async def callback(self, interaction: discord.Interaction):
-
         # check if the bot has permission to create threads
-        
-
-       
-
         selected_value = self.values[0]
         
         selected_channel = discord.utils.get(interaction.guild.text_channels, id=int(selected_value))
@@ -400,6 +429,21 @@ class GlobalChannelSelect(Select):
         await interaction.response.defer(ephemeral=True)  # prevent "interaction failed"
         await self.parentview.update_embed()
 
+
+class HostRoleSelect(Select):
+    def __init__(self, roleoptions: list[SelectOption], parentview: discord.ui.View):
+        super().__init__(placeholder="Choose who can host pvp (everyone by default)", options=roleoptions, row=3)
+        self.parentview = parentview
+    
+    async def callback(self, interaction: discord.Interaction):
+        selected_value = self.values[0]
+        if selected_value == "1393397825085374587":
+            await set_setting(interaction.guild.id, "host_role", False)
+        else:
+            await set_setting(interaction.guild.id, "host_role", selected_value)
+
+        await interaction.response.defer(ephemeral=True)  # prevent "interaction failed"
+        await self.parentview.update_embed()
 # user selects a region -> lets them choose from a list of roles to set for that region
 
 class RegionalRolesSelect(Select):
@@ -463,13 +507,15 @@ class RegionButtons(discord.ui.View):
         await interaction.response.edit_message(view=self)
 
 class GlobalSettingsView(discord.ui.View):
-    def __init__(self, channels: list[SelectOption], guild_id: int):
+    def __init__(self, channels: list[SelectOption], roles: list[SelectOption], guild_id: int):
         super().__init__()
         self.regional_roles = "Not configured"  # default value
+        self.host_role = "Not configured, everyone by default"
         self.add_item(GlobalChannelSelect(channels, self))
+        self.add_item(HostRoleSelect(roles, self))
         self.guild_id = guild_id
         self.message = None  # Will be assigned after sending
-
+        
     @discord.ui.button(label="Set Regional PVP Roles", style=discord.ButtonStyle.primary, row=1)
     async def set_regional_roles(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(view=RegionButtons(self.guild_id, self))
@@ -486,7 +532,8 @@ class GlobalSettingsView(discord.ui.View):
         await set_setting(self.guild_id, "global_pvp_enabled", False)
         await interaction.response.defer(ephemeral=True)  # prevents double send
         await self.update_embed()
-        
+    
+
     async def update_embed(self):
         guild = await get_guild_from_id(self.guild_id)
         global_pvp_channel_id = await get_setting(self.guild_id, "global_pvp_channel")
@@ -526,20 +573,6 @@ async def location_autocomplete(interaction: discord.Interaction, current: str):
         "Mount Orthys",
         "Mount Enkav",
         "Pelion Rift",
-        "North of Vareska",
-        "Sunken Caverns",
-        "Temple of Valor",
-        "Aetherforge Bridge",
-        "Cliffside Watchtower",
-        "Ruins of Oryk",
-        "Snowveil Summit",
-        "Crimson Hollow",
-        "Verdant Plains",
-        "Whispering Grove",
-        "Forgotten Spire",
-        "Ironclad Barracks",
-        "Duskmire Marshes",
-        "Zephyr Expanse"
     ]
 
     matches = [loc for loc in locations if current.lower() in loc.lower()]
@@ -574,11 +607,15 @@ async def get_muted_users(guild_id: int):
 
 class GlobalPVPCommands(app_commands.Group):
     # show global settings command
-    @app_commands.command(name="settings", description="show the current global settings.")
+    @app_commands.command(name="settings", description="edit the current global settings.")
     @app_commands.checks.has_permissions(manage_channels=True)
     async def globals(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)  # <-- Respond immediately to avoid expiration
-
+                
+        if not interaction.guild.id:
+            await interaction.response.send_message(f"❌ this command is not available in DMs", ephemeral=True)
+            return
+        
         embed = discord.Embed(
             title="Loading...",
             description="Use the buttons below to configure your preferences.",
@@ -586,7 +623,8 @@ class GlobalPVPCommands(app_commands.Group):
         )
 
         channels = await text_channel_options(interaction.guild.id)
-        view = GlobalSettingsView(channels, interaction.guild_id)
+        roles = await get_roles_as_options(interaction.guild.id)
+        view = GlobalSettingsView(channels, roles, interaction.guild_id)
         
         sent = await interaction.followup.send(embed=embed, view=view, ephemeral=True)  # <-- Follow up instead
         view.message = sent
@@ -604,7 +642,6 @@ class GlobalPVPCommands(app_commands.Group):
         region=region_choices,
     )
     @app_commands.autocomplete(where=location_autocomplete)
-    @app_commands.checks.has_permissions(manage_channels=True)
     @app_commands.checks.cooldown(1, 900, key=None)
     async def ping(
         self,
@@ -615,6 +652,14 @@ class GlobalPVPCommands(app_commands.Group):
         extra: str = None,
     ):
         
+        if not interaction.guild.id:
+            await interaction.response.send_message(f"❌ this command is not available in DMs", ephemeral=True)
+            return
+
+        host_role = await get_setting(interaction.guild.id, "host_role")
+        if host_role and not host_role in interaction.user.roles:
+            await interaction.response.send_message(f"❌ you need the role <@&{host_role}> to ping for pvp", ephemeral=True)
+
         global_pvp_channel_id = await get_setting(interaction.guild.id, "global_pvp_channel")
         if not global_pvp_channel_id or not interaction.guild.get_channel(int(global_pvp_channel_id)):
             await interaction.response.send_message(f"❌ no global pvp channel set. Please tell an admin to set a global pvp channel with `/globalpvp setchannel`", ephemeral=True)
@@ -820,6 +865,7 @@ class SetupView(View):
         self.step = 0
         self.selected_channel = None
         self.regional_roles = {}
+        self.latest_interaction: Interaction | None = None  # Add this line
 
     async def interaction_check(self, interaction: Interaction) -> bool:
         return interaction.user.guild_permissions.administrator
@@ -835,6 +881,8 @@ class SetupView(View):
         elif self.step == 3:
             await self.step_assign_roles(interaction)
         elif self.step == 4:
+            await self.step_set_host_role(interaction)
+        elif self.step == 5:
             await self.finish(interaction)
 
     async def step_enable_global_pvp(self, interaction: Interaction):
@@ -872,95 +920,110 @@ class SetupView(View):
         self.add_item(enable_button)
         self.add_item(disable_button)
 
-        await interaction.edit_original_response(
-            content="✅ Step 1: Do you want to enable Global PvP? This will allow your users to ping an entire region for pvp, and allow your server to receive pings (don't worry, region roles must be set first)",
-            view=self
+        await interaction.response.send_message(
+            content="✅ Step 1: Do you want to enable Global PvP? \n This will allow your users to ping an entire region for pvp, and allow your server to receive pings (don't worry, region roles must be set first) \n All settings can be changed later using /globalpvp settings",
+            view=self,
+            ephemeral=True
         )
+
+
 
 
     async def step_select_channel(self, interaction: Interaction):
-        options = [
-            SelectOption(label=channel.name, value=str(channel.id))
-            for channel in self.guild.text_channels if channel.permissions_for(self.guild.me).send_messages
-        ]
+        self.latest_interaction = interaction
 
-        select = Select(placeholder="Select a global PvP channel...", options=options, row=0)
-        skip = Button(label="Skip", style=ButtonStyle.danger, custom_id="skip_channel", row=1)
-
-        async def select_callback(i: Interaction):
-            self.selected_channel = int(select.values[0])
-            await set_setting(self.guild.id, "global_pvp_channel", self.selected_channel)
-            await i.response.edit_message(
-                content=f"✔️ Global PvP channel set to <#{self.selected_channel}>.\n\n➡️ Next: Assign regional roles.",
-                view=None
-            )
-            await asyncio.sleep(3)
-            await self.next_step(i)  # use i, not original interaction
-
-        async def skip_callback(i: Interaction):
-            await i.response.edit_message(
-                content="⏭️ Skipped setting Global PvP channel.\n\n➡️ Next: Assign regional roles.",
-                view=self
-            )
-            await asyncio.sleep(3)
+        async def on_done(i: Interaction):
+            self.latest_interaction = i
             await self.next_step(i)
 
-        # Assign callbacks
-        select.callback = select_callback
-        skip.callback = skip_callback
+        done = Button(label="Done/Skip", style=ButtonStyle.success, row=1)
+        done.callback = on_done
+        self.clear_items()
+        self.add_item(done)
 
-        self.add_item(select)
-        self.add_item(skip)
+        # 🛠 FIX: Defer the response so followup works
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
 
-        await interaction.edit_original_response(
-            content="✅ Step 2: Select a text channel to use for Global PvP pings.\nIf your channel isn't listed, make sure the bot has the `Send Messages` permission and use `/globalpvp setchannel` later.",
-            view=self
-        )
+
+        await interaction.edit_original_response(content="Step 2: Use `/globalpvp setchannel` to select a global PvP channel", view=self)
 
     async def step_assign_roles(self, interaction: Interaction):
-        await interaction.edit_original_response(content="✅ Step 3: Please type role mentions in this format:\n```\nNorth America: @na-role\nEurope: @eu-role\nAsia: @asia-role\n``` \n This can be changed later with `/globalpvp setregionalroles`", view=None)
+        self.latest_interaction = interaction
 
-        def check(m): return m.author == interaction.user and m.channel == interaction.channel
+        async def on_done(i: Interaction):
+            self.latest_interaction = i
+            await self.next_step(i)
 
-        try:
-            msg = await bot.wait_for("message", timeout=120, check=check)
-            lines = msg.content.strip().splitlines()
-            for line in lines:
-                if ":" in line:
-                    region, mention = line.split(":", 1)
-                    region = region.strip()
-                    role_id = int(mention.strip().strip("<@&>"))
-                    self.regional_roles[region] = role_id
+        done = Button(label="Done/Skip", style=ButtonStyle.success, row=1)
+        done.callback = on_done
+        self.clear_items()
+        self.add_item(done)
 
-            await set_setting(self.guild.id, "regional_roles", self.regional_roles)
-            
-            await interaction.followup.send("✔️ Regional roles saved", ephemeral=True)
-            await self.next_step(interaction)
+        # 🛠 FIX: Defer the response so followup works
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
 
-        except asyncio.TimeoutError:
-            await interaction.followup.send("⏰ Timeout during role input. Run `/setup` again to restart.", ephemeral=True)
 
+        await interaction.edit_original_response(content="Step 3: Use `/globalpvp setregionalroles` to assign roles to regions", view=self)
+
+
+    async def step_set_host_role(self, interaction: Interaction):
+        self.latest_interaction = interaction
+
+        async def on_done(i: Interaction):
+            self.latest_interaction = i
+            await self.next_step(i)
+
+        done = Button(label="Done/Skip", style=ButtonStyle.success, row=1)
+        done.callback = on_done
+        self.clear_items()
+        self.add_item(done)
+
+        # 🛠 FIX: Defer the response so followup works
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
+
+
+        await interaction.edit_original_response(content="Step 4: Use `/globalpvp sethostrole` to set who can host pvp (everyone by default)", view=self)
 
     async def finish(self, interaction: Interaction):
-        summary = f"""🎉 Setup complete! Use `/setup` and `/globalpvp settings` to configure your preferences. Players can use `/findpvp` to find players to 1v1, or `/globalpvp ping` to ping an entire region for pvp.
-\n\n
-**Global PvP Enabled:** {await get_toggle(interaction.guild.id, "global_pvp_enabled")}
-**Global PvP Channel:** <#{self.selected_channel}>
-**Regional Roles:**\n""" + "\n".join(f"• {region}: <@&{rid}>" for region, rid in self.regional_roles.items())
-
-        await interaction.followup.send(summary, ephemeral=True)
+        regional_roles = await get_regional_roles_dict(interaction.guild.id)
+        channel_mention = f"<#{self.selected_channel}>" if self.selected_channel else "*Not set*"
+        summaryEmbed = discord.Embed(
+            title="🎉 Setup complete!",
+            description="Use `/globalpvp settings` to configure your preferences. Players can use `/findpvp` to find players to 1v1, or `/globalpvp ping` to ping an entire region for pvp.",
+            color=discord.Color.blue()
+        )
+        summaryEmbed.add_field(name="Global PvP Enabled", value=await get_toggle(interaction.guild.id, "global_pvp_enabled"), inline=False)
+        summaryEmbed.add_field(name="Global PvP Channel", value=channel_mention, inline=False)
+        summaryEmbed.add_field(name="Regional Roles", value="\n".join(f"• {region}: <@&{rid}>" for region, rid in regional_roles.items()), inline=False)
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
+        await interaction.edit_original_response(embed=summaryEmbed, view=None) 
 
 
 @bot.tree.command(name="setup", description="Step-by-step setup for AO Challenger")
 @app_commands.checks.has_permissions(administrator=True)
-async def setup(interaction: discord.Interaction):
-    await interaction.response.send_message("🔧 Starting setup wizard...", ephemeral=True)
+async def setup(interaction: discord.Interaction): 
+    if not interaction.guild.id:
+        await interaction.response.send_message(f"❌ this command is not available in DMs", ephemeral=True)
+        return
     view = SetupView(interaction.guild)
     await view.next_step(interaction)
 
+@bot.tree.command(name="help", description="How to use the bot and all commands")
+async def help(interaction: discord.Interaction):
+    await interaction.response.send_message(f"All commands and guide: https://ciabidev.github.io/challenger/",embed=None)
 
+@bot.tree.command(name="invite", description="Invite the bot to your server")
+async def invite(interaction: discord.Interaction):
+    # get invite.txt
+    with open("app/invite.txt", "r") as f:
+        invite = f.read()
+    await interaction.response.send_message(f"[invite me to your server]({invite})", embed=None)
 
-@bot.tree.command(name="findpvp", description="Find a player to pvp")
+@bot.tree.command(name="findpvp", description="Join a queue to find a player to pvp")
 @app_commands.describe(
     region="the region to queue for pvp",
     username="Roblox username",
@@ -979,36 +1042,59 @@ async def queue_command(interaction: discord.Interaction, username: str, region:
 
     # using roblox api, check if the user exists
     msg = None
+
     try:
-        user_exists = await roblox_user_exists(username)
+        roblox_username = await roblox_user_exists(username)
         discord_user_already_in_queue = await db.queue.find_one({"user_id": int(interaction.user.id)})
-        if user_exists:
+        if roblox_username:
             if not searchingPlayer and not discord_user_already_in_queue:
                 await db.queue.insert_one({
                     "region": region,
-                    "username": username,
+                    "username": roblox_username,
                     "extra": extra,
                     "where": where,
                     "user_id": int(interaction.user.id),
                     "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
                 })
-                searchingPlayer = await db.queue.find_one({"region": region, "username": username})
+                searchingPlayer = await db.queue.find_one({"region": region, "username": roblox_username})
                 view = QueueView(searchingPlayer["_id"])
-                await interaction.response.send_message(f"✅ added `{username}` to the queue for pvp in {region}. Players you can be paired with will be limited to the region you selected.", ephemeral=True, view=view)
+                
+                addedEmbed = discord.Embed(
+                    title="✅ Joined queue",
+                    description=f"Players you can be paired with will be limited to the region you selected.",
+                    color=discord.Color.blue(),
+                )
+
+                addedEmbed.add_field(name="Region", value=region, inline=False)
+                addedEmbed.add_field(name="Username", value=roblox_username, inline=False)
+                addedEmbed.add_field(name="Extra", value=extra, inline=False)
+                addedEmbed.add_field(name="Where", value=where, inline=False)
+                await interaction.response.send_message(embed=addedEmbed, view=view, ephemeral=True)
             else:
                 await db.queue.update_one({"user_id": int(interaction.user.id)}, { # prevents players from editing others queue
                     "$set": {
                         "region": region,
-                        "username": username,
+                        "username": roblox_username,
                         "extra": extra,
                         "where": where,
                         "user_id": int(interaction.user.id),
                         "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
                     }
                 })
-                searchingPlayer = await db.queue.find_one({"region": region, "username": username})
+                searchingPlayer = await db.queue.find_one({"region": region, "username": roblox_username})
                 view = QueueView(searchingPlayer["_id"])
-                await interaction.response.send_message(f"edited your queue for pvp")
+
+                changesEmbed = discord.Embed(
+                    title="☑️ Edited your user",
+                    description=f"Players you can be paired with will be limited to the region you selected.",
+                    color=discord.Color.blue(),
+                )
+
+                changesEmbed.add_field(name="Region", value=region, inline=False)
+                changesEmbed.add_field(name="Username", value=roblox_username, inline=False)
+                changesEmbed.add_field(name="Extra", value=extra, inline=False)
+                changesEmbed.add_field(name="Where", value=where, inline=False)
+                await interaction.response.send_message(embed=changesEmbed, view=view, ephemeral=True)
             msg = await interaction.original_response()
             view.message = msg  
         else:
@@ -1025,13 +1111,25 @@ async def queue_command(interaction: discord.Interaction, username: str, region:
     # wait until another player with same region is in queue. times out after 5 minutes
 
     foundPlayer = None
-    searchingPlayer = None
     while True:
-        foundPlayer = await db.queue.find_one({"region": region, "username": {"$ne": username}})
-
-        if foundPlayer:
+        foundPlayer = await db.queue.find_one({"region": region, "username": {"$ne": roblox_username}})
+        if foundPlayer and foundPlayer["user_id"] != int(interaction.user.id):
             foundPlayer_mention = f"<@{foundPlayer['user_id']}>"
-            result = await interaction.followup.send(f"✅✅ found a player: [{foundPlayer_mention}] \n Roblox Username/Code is `{foundPlayer['username']}`\nRegion is `{foundPlayer['region']}`\nExtra info: `{foundPlayer['extra']}`")
+            foundPlayer_id = await get_roblox_user_id(foundPlayer["username"])
+            foundPlayer_headshot = await get_roblox_headshot(foundPlayer_id)
+            resultEmbed = discord.Embed(
+                title="🎉 Found a player",
+                description=f" ",
+                color=discord.Color.blue(),
+            )
+            resultEmbed.set_thumbnail(url=foundPlayer_headshot)
+
+            resultEmbed.add_field(name="Region", value=foundPlayer["region"], inline=False)
+            resultEmbed.add_field(name="Roblox Username", value=foundPlayer["username"], inline=False)
+            resultEmbed.add_field(name="Extra", value=foundPlayer["extra"], inline=False)
+            resultEmbed.add_field(name="Where", value=foundPlayer["where"], inline=False)
+
+            result = await interaction.followup.send(f"{interaction.user.mention} you've been paired with {foundPlayer_mention}", embed=resultEmbed, ephemeral=True)
             await db.queue.delete_one({"username": foundPlayer["username"]})
             await db.queue.delete_one({"username": searchingPlayer["username"]})
             break
@@ -1039,12 +1137,12 @@ async def queue_command(interaction: discord.Interaction, username: str, region:
         await asyncio.sleep(1)
         if searchingPlayer != None:
             if datetime.datetime.now(datetime.timezone.utc) - datetime.datetime.fromisoformat(searchingPlayer["created_at"]) > datetime.timedelta(minutes=5):
-                result = await interaction.followup.send("❌ No player found in 5 minutes. Cancelling queue.", ephemeral=True)
+                result = await interaction.followup.send("{interaction.user.mention} ❌ No player found in 5 minutes. Cancelling queue.", ephemeral=True)
                 await msg.delete()
                 await db.queue.delete_one({"username": searchingPlayer["username"]})
                 break
-            if db.queue.count_documents() == 0:
-                result = await interaction.followup.send("The queue has been cleared. Cancelling queue.", ephemeral=True)
+            if await db.queue.count_documents({}) == 0:
+                result = await interaction.followup.send("{interaction.user.mention} The queue has been cleared. Cancelling queue.", ephemeral=True)
                 await msg.delete()
                 break
 

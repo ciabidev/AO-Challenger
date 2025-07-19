@@ -1,9 +1,1 @@
-https://discord.com/oauth2/authorize?client_id=1390749462070296617&permissions=581085453216848&integration_type=0&scope=bot
-https://discord.com/oauth2/authorize?client_id=1390749462070296617&permissions=8&integration_type=0&scope=bot
-
-https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&scope=bot%20applications.commands&permissions=YOUR_PERMISSION_INTEGER
-
-perm integer: 8
-client id: 1390749462070296617
-
-https://discord.com/oauth2/authorize?client_id=1390749462070296617&scope=bot%20applications.commands&permissions=8
+https://discord.com/oauth2/authorize?client_id=1393757819475464313
