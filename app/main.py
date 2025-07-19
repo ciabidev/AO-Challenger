@@ -572,7 +572,7 @@ async def location_autocomplete(interaction: discord.Interaction, current: str):
         "Munera Garden",
         "Mount Orthys",
         "Mount Enkav",
-        "Pelion Rift",
+        "Pelion Rift"
     ]
 
     matches = [loc for loc in locations if current.lower() in loc.lower()]
