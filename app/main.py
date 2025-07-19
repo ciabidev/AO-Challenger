@@ -1023,6 +1023,13 @@ async def invite(interaction: discord.Interaction):
         invite = f.read()
     await interaction.response.send_message(f"[invite me to your server]({invite})", embed=None)
 
+@bot.tree.command(name="upvote", description="suport the bot for FREE by upvoting it on top.gg")
+async def upvote(interaction: discord.Interaction):
+    # get invite.txt
+    with open("app/upvote.txt", "r") as f:
+        upvote = f.read()
+    await interaction.response.send_message(f"[upvote me on top.gg]({upvote})")
+    
 @bot.tree.command(name="findpvp", description="Join a queue to find a player to pvp")
 @app_commands.describe(
     region="the region to queue for pvp",
