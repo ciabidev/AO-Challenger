@@ -813,7 +813,7 @@ class GlobalPVPCommands(app_commands.Group):
 
         confirmEmbed = discord.Embed(
             title="⚠️ Block User",
-            description=f"Are you sure you want to block `{username}` for {duration} day(s)? This will prevent them from \n - sending messages to your hosts \n - pinging your server for pvp \n - announcing to your guests \n - any more interactions with your server",
+            description=f"Are you sure you want to block `{username}` for {duration} day(s)? This will prevent them from \n - sending messages to your hosts \n - pinging your server for pvp \n - announcing to your guests \n - any more Challenger-Related interactions with your server",
             color=discord.Color.blue()
         )
         confirmEmbed.add_field(name="Username", value=username, inline=False)
