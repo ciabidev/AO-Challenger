@@ -79,7 +79,6 @@ async def roblox_user_exists(username: str) -> bool:
             
             result = await resp.json()
             ## return the username
-            print(result)
             return result.get("data", [])[0].get("name")
 
 async def get_roblox_user_id(username: str):
@@ -96,7 +95,6 @@ async def get_roblox_user_id(username: str):
             
             result = await resp.json()
             ## return the id
-            print(result)
             return result.get("data", [])[0].get("id")
 
 async def get_roblox_headshot(user_id: int):
@@ -137,9 +135,6 @@ async def on_ready():
     for guild in bot.guilds:
         # Await the coroutine properly to get the list of active threads
         threads = await guild.active_threads()
-
-        for channel in guild.text_channels:
-            thread_cache[channel.id] = channel
 
         for thread in threads:
             thread_cache[thread.id] = thread
@@ -247,6 +242,9 @@ async def cooldown_timer(user_id):
 
 @bot.event
 async def on_message(message: discord.Message):
+    if message.guild == None:
+        return
+    
     await get_blocked_users(message.guild.id) # user activity automatically updates blocked users
     if message.author.bot:
         return
@@ -254,19 +252,16 @@ async def on_message(message: discord.Message):
 
     
     channel_id = int(message.channel.id)
-    user_id = int(message.author.id)
-    
-    print(f"rate limited users: {rate_limited_users}")
-    
+    user_id = int(message.author.id)    
 
-    if user_id in rate_limited_users and rate_limited_users[user_id] == 5:
+    if user_id in rate_limited_users and rate_limited_users[user_id] == 5 and message.channel.id in thread_cache:
         # reply to user that they are rate limited ephemeral 
         msg = await message.reply(f"message not published. Please wait {rate_limited_users[user_id]} seconds before sending another message.")
         await asyncio.sleep(2)
         await msg.delete()
         return
 
-    else:
+    elif message.channel.id in thread_cache:
         # ─── Check if message is from a HOST THREAD ─────────────────────────────
         rate_limited_users[user_id] = COOLDOWN_DURATION
         asyncio.create_task(cooldown_timer(user_id))
