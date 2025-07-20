@@ -1281,7 +1281,7 @@ async def queue_command(interaction: discord.Interaction, username: str, region:
         await asyncio.sleep(1)
         if searchingPlayer != None:
             if datetime.datetime.now(datetime.timezone.utc) - datetime.datetime.fromisoformat(searchingPlayer["created_at"]) > datetime.timedelta(minutes=5):
-                result = await interaction.followup.send("{interaction.user.mention} ❌ No player found in 5 minutes. Cancelling queue.", ephemeral=True)
+                result = await interaction.followup.send(f"{interaction.user.mention} ❌ No player found in 5 minutes. Cancelling queue.", ephemeral=True)
                 await msg.delete()
                 await db.queue.delete_one({"username": searchingPlayer["username"]})
                 break
