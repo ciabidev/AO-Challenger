@@ -1286,7 +1286,7 @@ async def queue_command(interaction: discord.Interaction, username: str, region:
                 await db.queue.delete_one({"username": searchingPlayer["username"]})
                 break
             if await db.queue.count_documents({}) == 0:
-                result = await interaction.followup.send("{interaction.user.mention} The queue has been cleared. Cancelling queue.", ephemeral=True)
+                result = await interaction.followup.send(f"{interaction.user.mention} The queue has been cleared. Cancelling queue.", ephemeral=True)
                 await msg.delete()
                 break
 
