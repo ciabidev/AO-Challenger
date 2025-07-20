@@ -17,6 +17,7 @@ To block a user from interacting with your server via Challenger, use `/globalpv
 
 ## reporting abuse
 [Report or appeal a ban](https://tally.so/r/3X6yqV)
+
 If you find a user spamming commands or breaking TOS with the global chat feature, please report them ASAP
 
 
