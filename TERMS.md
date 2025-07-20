@@ -1,3 +1,4 @@
+pls star pls star pls star tyyy
 # terms and ethics
 these terms are applicable only when using the official AO Challenger instance.
 
