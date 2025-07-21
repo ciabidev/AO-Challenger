@@ -40,7 +40,11 @@ To setup the bot for your server, simply use \`/setup\`
 ## Terms and Privacy
 
 [Terms, Ethics, Privacy](https://github.com/ciabidev/AO-Challenger/blob/main/TERMS.md)
-[Ban Appeals](https://github.com/ciabidev/AO-Challenger/blob/main/TERMS.md)
+
+If you find a player abusing the bot or breaking Discord TOS, please report them ASAP:
+
+[Ban Appeals and Reports](https://tally.so/forms/3X6yqV/share)
+
 ## Why can't I add the bot / Why is it so slow?
 
 Two possible reasons:
