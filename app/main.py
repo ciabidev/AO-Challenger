@@ -21,8 +21,13 @@ from typing import List
 from motor.motor_asyncio import AsyncIOMotorClient
 import json
 
+dev_mode = False
+
 load_dotenv()
 token = os.getenv("DISCORD_TOKEN")
+
+if dev_mode:
+    token = os.getenv("TESTING_TOKEN")
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -50,6 +55,9 @@ from motor.motor_asyncio import AsyncIOMotorClient
 MONGO_URI = os.getenv("MONGO_URI")
 mongo_client = AsyncIOMotorClient(MONGO_URI)
 db = mongo_client["challenger"]
+
+if dev_mode:
+    db = mongo_client["challenger-testing"]
 
 import pymongo
 # The db variable will be set in on_ready
@@ -550,75 +558,83 @@ class RegionButtons(discord.ui.View):
         await self.update_select_options("Asia")
         await interaction.response.edit_message(view=self)
 
-# since we have to use commands for the best UX, we can't use a settings view. read more below
-# class GlobalSettingsView(discord.ui.View):
-#     # channel and role selections have been removed for optimization and ease of use
-#     ## discord only allows 25 options per select
-#     ## adding pagination to each select would lead to the code being too complex 
-#     ## until discord allows more than 25 options per select, this is staying
+class GlobalSettingsView(discord.ui.View):
+   # why cant I change more settings?
+    # channel and role selections have been removed for optimization and ease of use
+    ## discord only allows 25 options per select
+    ## adding pagination to each select would lead to the code being too complex 
+    ## until discord allows more than 25 options per select, this is staying
 
-#     def __init__(self, channels: list[SelectOption], roles: list[SelectOption], guild_id: int):
-#         super().__init__()
-#         self.regional_roles = "Not configured"  # default value
-#         self.host_role = "Not configured, everyone by default"
-#         # self.add_item(GlobalChannelSelect(channels, self))
-#         # self.add_item(HostRoleSelect(roles, self))
-#         self.guild_id = guild_id
-#         self.message = None  # Will be assigned after sending
-        
-#     # @discord.ui.button(label="Set Regional PVP Roles", style=discord.ButtonStyle.primary, row=1)
-#     # async def set_regional_roles(self, interaction: discord.Interaction, button: discord.ui.Button):
-#     #     await interaction.response.edit_message(view=RegionButtons(self.guild_id, self))
-#     @discord.ui.button(label="Enable Global PVP", style=discord.ButtonStyle.green, row=2)
-#     async def enable_global_pvp_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-#         await set_setting(self.guild_id, "global_pvp_enabled", True)
-#         await interaction.response.defer(ephemeral=True)  # prevents double send
-#         await self.update_embed()
+    def __init__(self, channels: list[SelectOption], roles: list[SelectOption], guild_id: int):
+        super().__init__()
+        self.regional_roles = "Not configured"  # default value
+        self.host_role = "Not configured, everyone by default"
+        # self.add_item(GlobalChannelSelect(channels, self))
+        # self.add_item(HostRoleSelect(roles, self))
+        self.guild_id = guild_id
+        self.message = None  # Will be assigned after sending
+        asyncio.create_task(self.auto_reload())
+    # @discord.ui.button(label="Set Regional PVP Roles", style=discord.ButtonStyle.primary, row=1)
+    # async def set_regional_roles(self, interaction: discord.Interaction, button: discord.ui.Button):
+    #     await interaction.response.edit_message(view=RegionButtons(self.guild_id, self))
+
+    async def auto_reload(self):
+        while True:
+            await asyncio.sleep(10)
+            await self.update_embed()
 
 
-#     @discord.ui.button(label="Disable Global PVP", style=discord.ButtonStyle.red, row=2)
-#     async def disable_global_pvp_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-#         await set_setting(self.guild_id, "global_pvp_enabled", False)
-#         await interaction.response.defer(ephemeral=True)  # prevents double send
-#         await self.update_embed()
-    
+    @discord.ui.button(label="Enable Global PVP", style=discord.ButtonStyle.green, row=2)
+    async def enable_global_pvp_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await set_setting(self.guild_id, "global_pvp_enabled", True)
+        await interaction.response.defer(ephemeral=True)  # prevents double send
+        await self.update_embed()
 
-#     async def update_embed(self):
-#         guild = await get_guild_from_id(self.guild_id)
-#         global_pvp_channel_id = await get_setting(self.guild_id, "global_pvp_channel")
-#         global_pvp_channel = discord.utils.get(guild.text_channels, id=int(global_pvp_channel_id)) if global_pvp_channel_id else None
+
+    @discord.ui.button(label="Disable Global PVP", style=discord.ButtonStyle.red, row=2)
+    async def disable_global_pvp_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await set_setting(self.guild_id, "global_pvp_enabled", False)
+        await interaction.response.defer(ephemeral=True)  # prevents double send
+        await self.update_embed()
+
+    async def update_embed(self):
+        guild = await get_guild_from_id(self.guild_id)
+        global_pvp_channel_id = await get_setting(self.guild_id, "global_pvp_channel")
+        global_pvp_channel = discord.utils.get(guild.text_channels, id=int(global_pvp_channel_id)) if global_pvp_channel_id else None
             
-#         global_pvp_enabled = await get_toggle(self.guild_id, "global_pvp_enabled")
-#         host_role = await get_setting(self.guild_id, "host_role")
-#         # formatted regional roles
-#         regional_roles = await get_regional_roles_dict(self.guild_id)
-#         regional_roles_list = []
-#         for region, role_id in regional_roles.items():
-#             role = discord.utils.get(guild.roles, id=int(role_id))
-#             regional_roles_list.append(f"{region}: {role.mention}")
-#         regional_roles = "\n".join(regional_roles_list)
+        global_pvp_enabled = await get_toggle(self.guild_id, "global_pvp_enabled")
+        host_role = await get_setting(self.guild_id, "host_role")
+        # formatted regional roles
+        regional_roles = await get_regional_roles_dict(self.guild_id)
+        regional_roles_list = []
+        for region, role_id in regional_roles.items():
+            role = discord.utils.get(guild.roles, id=int(role_id))
+            regional_roles_list.append(f"{region}: {role.mention}")
+        regional_roles = "\n".join(regional_roles_list)
 
-#         print(f"Global channel: {global_pvp_channel}, PVP enabled: {global_pvp_enabled}, regional roles: {regional_roles}")
+        print(f"Global channel: {global_pvp_channel}, PVP enabled: {global_pvp_enabled}, regional roles: {regional_roles}")
 
-#         newembed = discord.Embed(
-#             title="⚙️ AO Challenger Settings",
-#             description="`/globalpvp setchannel` - set the global pvp channel \n `/globalpvp setregionalroles` - set the roles for each region to be pinged \n `/globalpvp sethostrole` - set who can host pvp (everyone by default) \n `/help` - all commmands and guide",
-#             color=discord.Color.blue()
-#         )
-#         newembed.add_field(name="Global PVP Channel", value=f"{global_pvp_channel.mention}" if global_pvp_channel else "None", inline=False)
-#         newembed.add_field(name="Regional PVP Roles", value=regional_roles if regional_roles else "North America: Not set \n Europe: Not set \n Asia: Not set", inline=False)
-#         if global_pvp_enabled:
-#             newembed.add_field(name=f"Global PVP?", value="✅ Enabled", inline=False)
-#         else:
-#             newembed.add_field(name=f"Global PVP?", value="❌ Disabled", inline=False)
+        newembed = discord.Embed(
+            title="⚙️ AO Challenger Settings",
+            description="`/globalpvp setchannel` - set the global pvp channel \n `/globalpvp setregionalroles` - set the roles for each region to be pinged \n `/globalpvp sethostrole` - set who can host pvp (everyone by default) \n `/help` - all commmands and guide",
+            color=discord.Color.blue()
+        )
+        newembed.set_footer(text="Updates every 10 seconds")
+        newembed.add_field(name="Global PVP Channel", value=f"{global_pvp_channel.mention}" if global_pvp_channel else "None", inline=False)
+        newembed.add_field(name="Regional PVP Roles", value=regional_roles if regional_roles else "North America: Not set \n Europe: Not set \n Asia: Not set", inline=False)
+        if global_pvp_enabled:
+            newembed.add_field(name=f"Global PVP?", value="✅ Enabled", inline=False)
+        else:
+            newembed.add_field(name=f"Global PVP?", value="❌ Disabled", inline=False)
         
-#         if host_role:
-#             newembed.add_field(name="Host Role", value=f"Users with role <@&{host_role}> can host public pvp", inline=False)
-#         else:
-#             newembed.add_field(name="Host Role", value="Anyone can host public pvp", inline=False)
-#         if self.message:
+        if host_role:
+            newembed.add_field(name="Host Role", value=f"Users with role <@&{host_role}> can host public pvp", inline=False)
+        else:
+            newembed.add_field(name="Host Role", value="Anyone can host public pvp", inline=False)
+        
+        if self.message:
             
-#             await self.message.edit(embed=newembed, view=self)
+            await self.message.edit(embed=newembed, view=self)
 async def location_autocomplete(interaction: discord.Interaction, current: str):
     locations = [
         "South of Caitara",
@@ -641,29 +657,28 @@ async def location_autocomplete(interaction: discord.Interaction, current: str):
 
 class GlobalPVPCommands(app_commands.Group):
     # show global settings command
-    # # since we have to use commands for the best UX, we can't use a settings view. read more in the GlobalSettingsView class
-    # @app_commands.command(name="settings", description="edit the current global settings.")
-    # @app_commands.checks.has_permissions(manage_channels=True)
-    # async def globals(self, interaction: discord.Interaction):
-    #     await interaction.response.defer(ephemeral=True)  # <-- Respond immediately to avoid expiration
+    @app_commands.command(name="settings", description="edit the current global settings.")
+    @app_commands.checks.has_permissions(manage_channels=True)
+    async def globals(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)  # <-- Respond immediately to avoid expiration
                 
-    #     if not interaction.guild.id:
-    #         await interaction.response.send_message(f"❌ this command is not available in DMs", ephemeral=True)
-    #         return
+        if not interaction.guild.id:
+            await interaction.response.send_message(f"❌ this command is not available in DMs", ephemeral=True)
+            return
         
-    #     embed = discord.Embed(
-    #         title="Loading...",
-    #         description="Use the buttons below to configure your preferences.",
-    #         color=discord.Color.blue()
-    #     )
+        embed = discord.Embed(
+            title="Loading...",
+            description="Use the buttons below to configure your preferences.",
+            color=discord.Color.blue()
+        )
 
-    #     channels = await text_channel_options(interaction.guild.id)
-    #     roles = await get_roles_as_options(interaction.guild.id)
-    #     view = GlobalSettingsView(channels, roles, interaction.guild_id)
+        channels = await text_channel_options(interaction.guild.id)
+        roles = await get_roles_as_options(interaction.guild.id)
+        view = GlobalSettingsView(channels, roles, interaction.guild_id)
         
-    #     sent = await interaction.followup.send(embed=embed, view=view, ephemeral=True)  # <-- Follow up instead
-    #     view.message = sent
-    #     await view.update_embed()
+        sent = await interaction.followup.send(embed=embed, view=view, ephemeral=True)  # <-- Follow up instead
+        view.message = sent
+        await view.update_embed()
 
 
     # ping for global pvp
@@ -694,9 +709,11 @@ class GlobalPVPCommands(app_commands.Group):
             return
 
         host_role = await get_setting(interaction.guild.id, "host_role")
-        if host_role and not host_role in interaction.user.roles:
-            await interaction.response.send_message(f"❌ you need the role <@&{host_role}> to ping for pvp", ephemeral=True)
 
+        if host_role and not any(role.id == host_role for role in interaction.user.roles):
+            await interaction.response.send_message(f"❌ you need the role <@&{host_role}> to ping for pvp", ephemeral=True)
+            return 
+        
         global_pvp_channel_id = await get_setting(interaction.guild.id, "global_pvp_channel")
         if not global_pvp_channel_id or not interaction.guild.get_channel(int(global_pvp_channel_id)):
             await interaction.response.send_message(f"❌ no global pvp channel set. Please tell an admin to set a global pvp channel with `/globalpvp setchannel`", ephemeral=True)
