@@ -47,9 +47,10 @@ If you find a player abusing the bot or breaking Discord TOS, please report them
 
 ## Why can't I add the bot / Why is it so slow?
 
-Two possible reasons:
+Four possible reasons:
 1. I accidentally made it private  
 2. For the bot to scale larger and be in more servers, I need to verify my identity. Unfortunately, I'm not old enough to verify my identity on Discord (18+)
 3. The Render free plan for the bot has expired
+4. The bot is being rate-limited. This means someone is spamming the bot, or there's just a lot of activity.
 
 In case any of these have happened, message @wheatwhole_ on Discord IMMEDIATELY.
