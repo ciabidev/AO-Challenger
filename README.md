@@ -6,36 +6,36 @@ AO Challenger is an Arcane Odyssey Discord bot that allows you to **ping globall
 
 ### For Users
 
-\`/help\` — get a list of commands
+`/help` — get a list of commands
 
-\`/findpvp\` — find a 1v1
+`/findpvp` — find a 1v1
 
-\`/globalpvp ping\` — ping an entire region for PvP
+`/globalpvp ping` — ping an entire region for PvP
 
-\`/invite\` — invite the bot to your server
+`/invite` — invite the bot to your server
 
-\`/upvote\` — upvote bot on top.gg to support it for FREE 💖 
+`/upvote` — upvote bot on top.gg to support it for FREE 💖 
 
 ### For Admins
 
 To setup the bot for your server, simply use \`/setup\`  
-\`/help\` — get a list of commands 
+`/help` — get a list of commands 
 
-\`/globalpvp blockuser \` — block a user from all Challenger-related interactions with your server. Can block users from other servers as well.
+`/globalpvp blockuser` — block a user from all Challenger-related interactions with your server. Can block users from other servers as well.
 
-\`/globalpvp unblockuser \` — unblock a user from your server
+`/globalpvp unblockuser` — unblock a user from your server
 
-\`/globalpvp listblocked \` — list all blocked users
+`/globalpvp listblocked` — list all blocked users
 
-\`/globalpvp setchannel\` — set the channel where global PvP pings will be sent  
+`/globalpvp setchannel` — set the channel where global PvP pings will be sent  
 
-\`/globalpvp setregionalroles\` — assign roles to regions to be pinged
+`/globalpvp setregionalroles` — assign roles to regions to be pinged
 
-\`/globalpvp sethostrole\` — choose the role that's allowed to use /globalpvp ping (@everyone by default)
+`/globalpvp sethostrole` — choose the role that's allowed to use /globalpvp ping (@everyone by default)
 
-\`/invite\` — invite the bot to your server
+`/invite` — invite the bot to your server
 
-\`/upvote\` — upvote bot on top.gg to support it for FREE 💖
+`/upvote` — upvote bot on top.gg to support it for FREE 💖
 
 ## Terms and Privacy
 
