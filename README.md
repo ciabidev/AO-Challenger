@@ -5,14 +5,13 @@ AO Challenger is an Arcane Odyssey Discord bot that allows you to **ping globall
 ## How to Use
 
 ### For Users
+`/invite` — invite the bot to your server
 
 `/help` — get a list of commands
 
 `/findpvp` — find a 1v1
 
 `/globalpvp ping` — ping an entire region for PvP
-
-`/invite` — invite the bot to your server
 
 `/upvote` — upvote bot on top.gg to support it for FREE 💖 
 
