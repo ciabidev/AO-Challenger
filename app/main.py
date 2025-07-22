@@ -1168,7 +1168,7 @@ async def setup(interaction: discord.Interaction):
 
 @bot.tree.command(name="help", description="How to use the bot and all commands")
 async def help(interaction: discord.Interaction):
-    await interaction.response.send_message(f"All commands and guide: https://ciabidev.github.io/challenger/",embed=None)
+    await interaction.response.send_message(f"\n `/findpvp` - find a 1v1 \n `/globalpvp ping` - ping an entire region for pvp \n\n [All commands and guide](https://github.com/ciabidev/AO-Challenger/blob/main/README.md) ",embed=None)
 
 @bot.tree.command(name="invite", description="Invite the bot to your server")
 async def invite(interaction: discord.Interaction):
