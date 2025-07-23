@@ -20,17 +20,19 @@ AO Challenger is an Arcane Odyssey Discord bot that allows you to **ping globall
 To setup the bot for your server, simply use \`/setup\`  
 `/help` — get a list of commands 
 
+`/globalpvp settings` — view the current Global PVP settings and Enable/Disable.
+
 `/globalpvp blockuser` — block a user from all Challenger-related interactions with your server. Can block users from other servers as well.
 
 `/globalpvp unblockuser` — unblock a user from your server
 
 `/globalpvp listblocked` — list all blocked users
 
-`/globalpvp setchannel` — set the channel where global PvP pings will be sent  
+`/globalpvp assignregions` — assign regions to channels and ping roles
 
-`/globalpvp setregionalroles` — assign roles to regions to be pinged
+`/globalpvp addhostrole` — add a role that can host pvp (everyone by default)
 
-`/globalpvp sethostrole` — choose the role that's allowed to use /globalpvp ping (@everyone by default)
+`/globalpvp clearhostroles` — remove all host roles
 
 `/invite` — invite the bot to your server
 
@@ -43,6 +45,9 @@ To setup the bot for your server, simply use \`/setup\`
 If you find a player abusing the bot or breaking Discord TOS, please report them ASAP:
 
 [Ban Appeals and Reports](https://tally.so/forms/3X6yqV/share)
+
+## Support the bot
+If you like the bot and want to support it for *free*, you can upvote it via `/upvote`.
 
 ## Why can't I add the bot / Why is it so slow?
 
