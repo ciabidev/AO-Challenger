@@ -17,7 +17,7 @@ AO Challenger is an Arcane Odyssey Discord bot that allows you to **ping globall
 
 ### For Admins
 
-To setup the bot for your server, simply use \`/setup\`  
+To setup the bot for your server, simply use `/setup`  
 `/help` — get a list of commands 
 
 `/globalpvp settings` — view the current Global PVP settings and Enable/Disable.
