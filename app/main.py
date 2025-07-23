@@ -21,7 +21,7 @@ from typing import List
 from motor.motor_asyncio import AsyncIOMotorClient
 import json
 
-dev_mode = True
+dev_mode = False
 
 load_dotenv()
 token = os.getenv("DISCORD_TOKEN")
