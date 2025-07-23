@@ -755,7 +755,7 @@ class GlobalPVPCommands(app_commands.Group):
                 extra_text = f"\nExtra info: {extra}" if extra else ""
                 guild_count = len(bot.guilds)
                 messagecontent = (
-                    f"{interaction.user.mention} is pvping at {where}. User/code: `{code}` {regional_role_mention} "
+                    f"{interaction.user.mention} is pvping at {where}. User/code: {code} {regional_role_mention} "
                     f"{extra_text}"
                     f"\n-# TIP: Use `/globalpvp ping` to ping an entire region for pvp"
                 )
