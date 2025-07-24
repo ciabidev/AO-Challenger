@@ -734,7 +734,8 @@ class GlobalPVPCommands(app_commands.Group):
 
                 if relay_cross_server_pvp_enabled:
                     sent_msg = await channel.send(messagecontent)                        
-                elif guild.id == interaction.guild.id: # relay servers includes the host server so we have to check for this
+                
+                if guild.id == interaction.guild.id: # relay servers includes the host server so we have to check for this
                     print("host server sent message")
                     sent_msg = await channel.send(messagecontent)
                 
