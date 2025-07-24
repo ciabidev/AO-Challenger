@@ -21,7 +21,7 @@ from typing import List
 from motor.motor_asyncio import AsyncIOMotorClient
 import json
 
-dev_mode = False
+dev_mode = True
 
 load_dotenv()
 token = os.getenv("DISCORD_TOKEN")
@@ -181,6 +181,8 @@ async def get_blocked_users(guild_id: int):
 
     return userlist
 
+
+
 async def is_blocked_user(username: str, guild_id: int):
     blocked_users = await get_blocked_users(guild_id)
     print(blocked_users)
@@ -193,7 +195,43 @@ async def is_blocked_user(username: str, guild_id: int):
 
     return False
 
+async def get_banned_users():
+    cursor = db.bans.find({})
+    banned_users = await cursor.to_list()
+    userlist = []
 
+    now = datetime.datetime.now(datetime.timezone.utc)
+
+    for user in banned_users:
+        try:
+            created_at = datetime.datetime.fromisoformat(user["created_at"])
+            userlist.append(user)
+
+        except KeyError as e:
+            print(f"Missing expected key in ban record: {e}")
+
+    return userlist
+
+
+async def is_banned_user(user_id):
+    banned_users = await get_banned_users()
+    print(banned_users)
+    print(user_id)
+    for user in banned_users: 
+        if user["user_id"] == int(user_id):
+            print(f"user {user} is banned")
+            return True
+            break
+
+# custom check class for every command if the user is banned
+async def ban_check(interaction: discord.Interaction) -> bool:
+    if await is_banned_user(interaction.user.id):  # make sure this is an async function if needed
+        await interaction.response.send_message(
+            "❌ You are banned from using the bot. Appeal here: https://tally.so/r/3X6yqV",
+            ephemeral=True
+        )
+        return True  # block the command
+    return False  # allow command
 
 async def get_relay_threads(host_id: int):
     config = await db.relay_threads.find_one({"host_id": int(host_id)})
@@ -250,6 +288,7 @@ async def cooldown_timer(user_id):
 
 @bot.event
 async def on_message(message: discord.Message):
+
     if message.guild == None:
         return
     
@@ -270,6 +309,10 @@ async def on_message(message: discord.Message):
         return
 
     elif message.channel.id in thread_cache:
+        if await is_banned_user(message.author.id):
+            await message.delete()
+            return
+        
         # ─── Check if message is from a HOST THREAD ─────────────────────────────
         rate_limited_users[user_id] = COOLDOWN_DURATION
         asyncio.create_task(cooldown_timer(user_id))
@@ -433,7 +476,7 @@ async def get_host_roles_formatted(guild_id: int) -> dict:
     return formatted_host_roles
 
 region_choices = [app_commands.Choice(name=region, value=region) for region in regions]
-
+            
 class GlobalSettingsView(discord.ui.View):
    # why cant I change more settings?
     # channel and role selections have been removed for optimization and ease of use
@@ -568,7 +611,10 @@ async def location_autocomplete(interaction: discord.Interaction, current: str):
 
 class GlobalPVPCommands(app_commands.Group):
     # show global settings command
+
+
     @app_commands.command(name="settings", description="edit the current global settings.")
+    
     @app_commands.checks.has_permissions(manage_channels=True)
     async def globalpvpsettings(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)  # <-- Respond immediately to avoid expiration
@@ -591,6 +637,7 @@ class GlobalPVPCommands(app_commands.Group):
 
     # ping for global pvp
     @app_commands.command(name="ping", description="ping an entire region for pvp/elysium")
+    
     @app_commands.describe(
         region="the region to ping for pvp",
         where="where are you pvping?",
@@ -611,9 +658,9 @@ class GlobalPVPCommands(app_commands.Group):
         code: str,
         extra: str = None,
     ):
-        if interaction.user.id == 742330381507756075:
+        if await ban_check(interaction):
             return
-            
+
         if not interaction.guild.id:
             await interaction.response.send_message(f"❌ this command is not available in DMs", ephemeral=True)
             return
@@ -633,6 +680,7 @@ class GlobalPVPCommands(app_commands.Group):
         else:
             await interaction.response.send_message(f"✅ your pvp announcement is out! Publish extra announcements in your host thread in <#{global_pvp_channel_id}>", ephemeral=True)
 
+        
         asyncio.create_task(self._handle_global_ping(interaction, region, where, code, extra))
 
     async def _handle_global_ping(self, interaction: discord.Interaction, region: str, where: str, code: str, extra: str = None):
@@ -685,10 +733,20 @@ class GlobalPVPCommands(app_commands.Group):
                 # cross server check
 
                 if relay_cross_server_pvp_enabled:
-                    sent_msg = await channel.send(messagecontent)
-                elif guild.id == interaction.guild.id: # relay servers includes the host server so we have to check for this
+                    sent_msg = await channel.send(messagecontent)                        
+                
+                if guild.id == interaction.guild.id: # relay servers includes the host server so we have to check for this
+                    print("host server sent message")
                     sent_msg = await channel.send(messagecontent)
                 
+                # also Auto Publish the sent message if the channel is a Discord Announcement Channel
+                if host_cross_server_pvp_enabled:
+                    if sent_msg and isinstance(channel, discord.TextChannel) and channel.is_news():
+                        try: 
+                            await sent_msg.publish()
+                        except Exception as e:
+                            print(f"Error publishing message: {e}")
+
                 # check if global pvp threads are enabled for this guild
                 if global_pvp_threads_enabled:
                     thread = await sent_msg.create_thread(
@@ -715,7 +773,7 @@ class GlobalPVPCommands(app_commands.Group):
                     if guild.id == interaction.guild_id:
                         host_thread_id = thread_id
                         await thread.send(
-                            f"👑 <@{interaction.user.id}> this is your HOST thread. Use this channel for announcements to your guests. Created on <t:{timestamp}:f>. "
+                            f"👑 <@{interaction.user.id}> this is your HOST thread. Use this channel for announcements to your guests (and guests in other servers if Cross Server PVP is enabled). Created on <t:{timestamp}:f>. "
                         )
                         await db.host_threads.insert_one({
                             "host_id": int(interaction.user.id),
@@ -813,7 +871,7 @@ class GlobalPVPCommands(app_commands.Group):
 
     @app_commands.command(name="unblockuser", description="Unblock a user from interacting with your server")
     @app_commands.describe(
-        username="Discord username",
+        username="Discord username, NOT Display Name",
     )
     @app_commands.checks.has_permissions(manage_channels=True)
     async def unblockuser(
@@ -1107,8 +1165,12 @@ class SetupView(View):
 
 
 @bot.tree.command(name="setup", description="Step-by-step setup for AO Challenger")
+
 @app_commands.checks.has_permissions(administrator=True)
 async def setup(interaction: discord.Interaction): 
+    if await ban_check(interaction):
+        return
+    
     if not interaction.guild.id:
         await interaction.response.send_message(f"❌ this command is not available in DMs", ephemeral=True)
         return
@@ -1120,6 +1182,7 @@ async def help(interaction: discord.Interaction):
     await interaction.response.send_message(f"\n `/findpvp` - find a 1v1 \n `/globalpvp ping` - ping an entire region for pvp \n\n [All commands and guide](https://github.com/ciabidev/AO-Challenger/blob/main/README.md) ",embed=None)
 
 @bot.tree.command(name="invite", description="Invite the bot to your server")
+
 async def invite(interaction: discord.Interaction):
     # get invite.txt
     with open("app/invite.txt", "r") as f:
@@ -1138,6 +1201,7 @@ async def upvote(interaction: discord.Interaction):
     await interaction.response.send_message(f"[upvote me on top.gg]({upvote})")
     
 @bot.tree.command(name="findpvp", description="Join a queue to find a player to pvp")
+
 @app_commands.describe(
     region="the region to queue for pvp",
     username="Roblox username",
@@ -1147,9 +1211,12 @@ async def upvote(interaction: discord.Interaction):
     region=region_choices,
 )
 
-
 @app_commands.autocomplete(where=location_autocomplete)
 async def queue_command(interaction: discord.Interaction, username: str, region: str, extra: str = None, where: str = None):
+    if await ban_check(interaction):
+        return
+    
+    
     searchingPlayer = await db.queue.find_one({"username": username})        
     
     view = None
@@ -1259,6 +1326,71 @@ async def queue_command(interaction: discord.Interaction, username: str, region:
                 result = await interaction.followup.send(f"<@{interaction.user.id}> The queue has been cleared. Cancelling queue.", ephemeral=True)
                 await msg.delete()
                 break
+
+@bot.tree.command(name="banuser", description="Ban a user from using the bot")
+@app_commands.describe(
+    user_id="Discord User ID",
+)
+async def banuser(
+    interaction: discord.Interaction,
+    user_id: str,
+):
+    if interaction.user.id == 968622168302833735:
+        await db.bans.insert_one({
+            "user_id": int(user_id),
+            "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+        })
+        await interaction.response.send_message(f"✅ <@{user_id}> banned", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"❌ you don't have permission to ban users from using the bot. to block users from interacting with your server, use `/globalpvp blockuser`", ephemeral=True)
+
+@bot.tree.command(name="unbanuser", description="Unban a user from using the bot")
+@app_commands.describe(
+    user_id="Discord User ID",
+)
+async def unbanuser(
+    interaction: discord.Interaction,
+    user_id: str,
+):
+    if interaction.user.id == 968622168302833735:
+        db.bans.delete_one({"user_id": int(user_id)})
+        await interaction.response.send_message(f"✅ unbanned <@{user_id}>", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"❌ you don't have permission to unban users from using the bot. to unblock users from interacting with your server, use `/globalpvp unblockuser`", ephemeral=True)
+
+
+
+@bot.tree.command(name="listbanned", description="List all banned users")
+async def listbanned(
+    interaction: discord.Interaction,
+):
+    if interaction.user.id != 968622168302833735:
+        await interaction.response.send_message(f"❌ you don't have permission to list users banned from using the bot. to list blocked users, use `/globalpvp listblocked`", ephemeral=True)
+        return
+    banned_users = await get_banned_users()
+    if not banned_users:
+        await interaction.response.send_message(f"❌ No banned users found", ephemeral=True)
+        return
+    
+    # list banned users in an embed field table, with fields for username, duration, days left, created_at
+    banned_users_embed = discord.Embed(
+        title="🔒 Banned Users",
+        description=f"Use `/unban` to unban a user",
+        color=discord.Color.blue()
+    )
+
+    # no duration for bans
+    for user in banned_users:
+        created_dt = datetime.datetime.fromisoformat(user['created_at'])
+
+        info = (
+            f"- Banned at: <t:{int(created_dt.timestamp())}:f>\n"
+        )
+
+
+        banned_users_embed.add_field(name=user["user_id"], value=info, inline=False)
+    await interaction.response.send_message(embed=banned_users_embed, ephemeral=True)
+    
 
 # register globalpvp class
 bot.tree.add_command(GlobalPVPCommands(name="globalpvp", description="global/public pvp management"))
