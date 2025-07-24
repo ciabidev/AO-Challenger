@@ -602,7 +602,7 @@ class GlobalPVPCommands(app_commands.Group):
         region=region_choices,
     )
     @app_commands.autocomplete(where=location_autocomplete)
-    @app_commands.checks.cooldown(1, 10, key=None)
+    @app_commands.checks.cooldown(1, 200, key=None)
     async def ping(
         self,
         interaction: discord.Interaction,
@@ -611,7 +611,9 @@ class GlobalPVPCommands(app_commands.Group):
         code: str,
         extra: str = None,
     ):
-        
+        if interaction.user.id == 742330381507756075:
+            return
+            
         if not interaction.guild.id:
             await interaction.response.send_message(f"❌ this command is not available in DMs", ephemeral=True)
             return
