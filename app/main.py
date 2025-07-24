@@ -771,7 +771,7 @@ class GlobalPVPCommands(app_commands.Group):
                     if guild.id == interaction.guild_id:
                         host_thread_id = thread_id
                         await thread.send(
-                            f"👑 <@{interaction.user.id}> this is your HOST thread. Use this channel for announcements to your guests. Created on <t:{timestamp}:f>. "
+                            f"👑 <@{interaction.user.id}> this is your HOST thread. Use this channel for announcements to your guests (and guests in other servers if Cross Server PVP is enabled). Created on <t:{timestamp}:f>. "
                         )
                         await db.host_threads.insert_one({
                             "host_id": int(interaction.user.id),
