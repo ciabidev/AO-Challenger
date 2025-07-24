@@ -602,7 +602,7 @@ class GlobalPVPCommands(app_commands.Group):
         region=region_choices,
     )
     @app_commands.autocomplete(where=location_autocomplete)
-    @app_commands.checks.cooldown(1, 10, key=None)
+    @app_commands.checks.cooldown(1, 200, key=None)
     async def ping(
         self,
         interaction: discord.Interaction,
