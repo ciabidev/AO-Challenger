@@ -716,9 +716,9 @@ class GlobalPVPCommands(app_commands.Group):
                 global_pvp_threads_enabled = await get_toggle(guild.id, "global_pvp_threads_enabled")
                 
                 # Get regional role config
-                regional_role = await get_setting(guild.id, f"{region} Role")
+                regional_role_id = await get_setting(guild.id, f"{region} Role")
 
-                regional_role_mention = f"(<@&{regional_role}>)" if regional_role else f"({region})\n-# No regional role set for {region}. Please contact a server admin if this isn't intentional"
+                regional_role_mention = f"(<@&{regional_role_id}>)" if regional_role_id else f"({region})\n-# No regional role set for {region}. Please contact a server admin if this isn't intentional"
                 extra_text = f"\nExtra info: {extra}" if extra else ""
                 guild_count = len(bot.guilds)
                 messagecontent = (
