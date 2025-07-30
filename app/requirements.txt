@@ -8,3 +8,4 @@ Flask
 motor
 pymongo
 datetime
+logging
