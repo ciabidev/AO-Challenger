@@ -3,7 +3,6 @@ from discord.ui import View, Select
 import requests
 import threading
 import os
-import sqlite3
 import asyncio
 import csv
 import io
@@ -20,6 +19,9 @@ from flask import Flask
 from typing import List
 from motor.motor_asyncio import AsyncIOMotorClient
 import json
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 dev_mode = False
 
@@ -82,7 +84,7 @@ async def roblox_user_exists(username: str) -> bool:
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=data) as resp:
             if resp.status != 200:
-                print(f"Failed request: {resp.status}")
+                logging.error(f"Failed request: {resp.status}")
                 return False
             
             result = await resp.json()
@@ -98,7 +100,7 @@ async def get_roblox_user_id(username: str):
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=data) as resp:
             if resp.status != 200:
-                print(f"Failed request: {resp.status}")
+                logging.error(f"Failed request: {resp.status}")
                 return False
             
             result = await resp.json()
@@ -125,16 +127,16 @@ async def get_roblox_headshot(user_id: int):
 
 @bot.event
 async def on_ready():
-    print(f'live on {bot.user.name} - {bot.user.id}')
+    logging.info(f'live on {bot.user.name} - {bot.user.id}')
 
     activity = discord.Activity(type=discord.ActivityType.listening, name="/findpvp /help")
     await bot.change_presence(activity=activity)
 
     try:
         synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} command(s)")
+        logging.info(f"Synced {len(synced)} command(s)")
     except Exception as e:
-        print(f"Error syncing commands: {e}")
+        logging.info(f"Error syncing commands: {e}")
 
     # Cache all text channels and threads from all guilds
 
@@ -147,7 +149,7 @@ async def on_ready():
             thread_cache[thread.id] = thread
         
 
-    print(f"Cached {len(thread_cache)} possible pvp channels/threads")
+    logging.info(f"Cached {len(thread_cache)} possible pvp channels/threads")
 
     # remove all queue entries on start
     await db.queue.delete_many({})
@@ -157,7 +159,7 @@ async def on_ready():
 @bot.event
 async def on_app_command_completion(interaction: discord.Interaction, command: discord.app_commands.Command):
     user = interaction.user
-    print(f"User {user.id} ({user.name}) used slash command '/{command.name}'")
+    logger.info(f"User {user.id} ({user.name}) used slash command '/{command.name}'")
 
 # GLOBAL PVP THREAD RELAY
 # Host sends a message in host thread which is forwarded to all relay threads
@@ -183,8 +185,7 @@ async def get_blocked_users(guild_id: int):
                 userlist.append(user)
 
         except KeyError as e:
-            print(f"Missing expected key in block record: {e}")
-
+            continue
     return userlist
 
 
@@ -193,7 +194,7 @@ async def is_blocked_user(username: str, guild_id: int):
     blocked_users = await get_blocked_users(guild_id)
     for user in blocked_users: 
         if user["username"] == username:
-            print(f"user {user} is blocked")
+            logging.info(f"user {user} is blocked")
             return True
             break
 
@@ -212,17 +213,16 @@ async def get_banned_users():
             userlist.append(user)
 
         except KeyError as e:
-            print(f"Missing expected key in ban record: {e}")
+            continue
 
     return userlist
 
 
 async def is_banned_user(user_id):
     banned_users = await get_banned_users()
-
     for user in banned_users: 
         if user["user_id"] == int(user_id):
-            print(f"user {user} is banned")
+            logging.info(f"user {user} is banned")
             return True
             break
 
@@ -247,21 +247,21 @@ relay_threads = {}
 @bot.event
 async def get_channel_cached(channel_id: int):
     if channel_id in thread_cache:
-        print(f"Returning cached channel {channel_id}")
+        logging.info(f"Returning cached channel {channel_id}")
         return thread_cache[channel_id]
     channel = bot.get_channel(channel_id)
     if channel:
-        print(f"Returning channel {channel_id}")
+        logging.info(f"Returning channel {channel_id}")
         thread_cache[channel_id] = channel
         return channel
     # fallback to fetching from API
     try:
-        print(f"Fetching channel {channel_id}")
+        logging.info(f"Fetching channel {channel_id}")
         channel = await bot.fetch_channel(channel_id)
         thread_cache[channel_id] = channel
         return channel
     except discord.NotFound:
-        print("Channel not found")
+        logging.error("Channel not found")
         return None
 
 
@@ -325,7 +325,7 @@ async def on_message(message: discord.Message):
         is_host_of_this_thread = host_entry and host_entry.get("host_id") == user_id
 
         if host_entry and is_host_of_this_thread:
-            print("message is from a host thread")
+            logging.info("message is from a host thread")
             host_id = host_entry["host_id"]
 
             # Fetch all relay threads associated with this host_id and host_thread_id
@@ -337,22 +337,22 @@ async def on_message(message: discord.Message):
             async for relay in relay_entries:
                 relay_thread_id = int(relay["relay_thread_id"])
                 host_thread_id = int(relay["host_thread_id"])
-                print(f"Relay thread id: {relay_thread_id}")
+                logging.info(f"Relay thread id: {relay_thread_id}")
                 relay_thread = bot.get_channel(relay_thread_id)
                 host_thread = bot.get_channel(host_thread_id)
                 if relay_thread is None:
                     try:
                         relay_thread = await bot.fetch_channel(relay_thread_id)
-                        print("Relay thread fetched")
+                        logger.info("Relay thread fetched")
                     except discord.NotFound:
-                        print(f"Relay thread {relay_thread_id} not found (may be deleted)")
+                        logger.warning(f"Relay thread {relay_thread_id} not found (may be deleted)")
                     except discord.Forbidden:
-                        print(f"No access to Relay thread {relay_thread_id}")
+                        logger.error(f"No access to Relay thread {relay_thread_id}")
                     except discord.HTTPException as e:
-                        print(f"Failed to fetch channel {relay_thread_id}: {e}")
+                        logger.error(f"Failed to fetch channel {relay_thread_id}: {e}")
 
                 if relay_thread:
-                    print("Relay thread found")
+                    logging.info("Relay thread found")
 
                     if message.channel.permissions_for(message.guild.me).manage_threads:
                         await asyncio.sleep(2)
@@ -367,7 +367,7 @@ async def on_message(message: discord.Message):
 
         # ─── Check if message is from a RELAY THREAD ────────────────────────────
         elif relay_entry and not is_host_of_this_thread:
-            print("message is from a relay thread")
+            logger.info("message is from a relay thread")
             host_id = relay_entry["host_id"]
             host_thread_id = relay_entry.get("host_thread_id")
             relay_thread_id = relay_entry.get("relay_thread_id")
@@ -375,9 +375,9 @@ async def on_message(message: discord.Message):
             relay_thread = bot.get_channel(int(relay_thread_id))
 
             if host_thread_id:
-                print("host thread id found")
+                logger.info("host thread id found")
                 if host_thread and relay_thread_id != host_thread_id:
-                    print("host channel found")
+                    logger.info("host channel found")
                     if message.channel.permissions_for(message.guild.me).manage_threads:
                         await asyncio.sleep(2)
                         is_blocked = await is_blocked_user(message.author.name, host_thread.guild.id)
@@ -432,7 +432,7 @@ async def debug_relays(ctx):
 async def get_setting(guild_id: int, name: str):
     config = await db.server_config.find_one({"guild_id": int(guild_id), "name": name})
     if not config:
-        print(f"No {name} set for guild {guild_id}")
+        logging.info(f"No {name} set for guild {guild_id}")
         return None
     return config["value"]
 
@@ -744,7 +744,7 @@ class GlobalPVPCommands(app_commands.Group):
                         try: 
                             await sent_msg.publish()
                         except Exception as e:
-                            print(f"Error publishing message: {e}")
+                            logger.error(f"Error publishing message: {e}")
 
                 # check if global pvp threads are enabled for this guild
                 if global_pvp_threads_enabled:
@@ -797,7 +797,7 @@ class GlobalPVPCommands(app_commands.Group):
                             await db.relay_threads.insert_one(entry)
 
             except Exception as e:
-                print(f"Error in globalpvp: {e}")
+                logger.error(f"Error in globalpvp: {e}")
 
             
     @ping.error
@@ -1025,7 +1025,6 @@ class SetupView(View):
 
             # Confirm it's saved
             current = await get_setting(interaction.guild.id, "global_pvp_enabled")
-            print(f"Saved value: {current}")  # Debug
 
 
             await interaction.edit_original_response(
@@ -1108,7 +1107,6 @@ class SetupView(View):
 
             # Confirm it's saved
             current = await get_setting(interaction.guild.id, "cross_server_pvp_enabled")   
-            print(f"Saved value: {current}")  # Debug
 
 
             await interaction.edit_original_response(
