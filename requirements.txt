@@ -1,11 +1,6 @@
 discord.py
-python-dotenv
 requests
-flask
 aiohttp
-logging
-Flask
+python-dotenv
+flask
 motor
-pymongo
-datetime
-logging
