@@ -49,7 +49,6 @@ def run_flask():
 # Start Flask in a separate thread so it doesn’t block the bot
 threading.Thread(target=run_flask).start()
 
-# SQLite data setup
 
 
 from motor.motor_asyncio import AsyncIOMotorClient
