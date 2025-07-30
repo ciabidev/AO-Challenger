@@ -20,9 +20,6 @@ from flask import Flask
 from typing import List
 from motor.motor_asyncio import AsyncIOMotorClient
 import json
-import logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 dev_mode = False
 
@@ -160,7 +157,7 @@ async def on_ready():
 @bot.event
 async def on_app_command_completion(interaction: discord.Interaction, command: discord.app_commands.Command):
     user = interaction.user
-    logger.info(f"User {user.id} ({user.name}) used slash command '/{command.name}'")
+    print(f"User {user.id} ({user.name}) used slash command '/{command.name}'")
 
 # GLOBAL PVP THREAD RELAY
 # Host sends a message in host thread which is forwarded to all relay threads
@@ -222,6 +219,7 @@ async def get_banned_users():
 
 async def is_banned_user(user_id):
     banned_users = await get_banned_users()
+
     for user in banned_users: 
         if user["user_id"] == int(user_id):
             print(f"user {user} is banned")
@@ -345,13 +343,13 @@ async def on_message(message: discord.Message):
                 if relay_thread is None:
                     try:
                         relay_thread = await bot.fetch_channel(relay_thread_id)
-                        logger.info("Relay thread fetched")
+                        print("Relay thread fetched")
                     except discord.NotFound:
-                        logger.warning(f"Relay thread {relay_thread_id} not found (may be deleted)")
+                        print(f"Relay thread {relay_thread_id} not found (may be deleted)")
                     except discord.Forbidden:
-                        logger.error(f"No access to Relay thread {relay_thread_id}")
+                        print(f"No access to Relay thread {relay_thread_id}")
                     except discord.HTTPException as e:
-                        logger.error(f"Failed to fetch channel {relay_thread_id}: {e}")
+                        print(f"Failed to fetch channel {relay_thread_id}: {e}")
 
                 if relay_thread:
                     print("Relay thread found")
@@ -369,7 +367,7 @@ async def on_message(message: discord.Message):
 
         # ─── Check if message is from a RELAY THREAD ────────────────────────────
         elif relay_entry and not is_host_of_this_thread:
-            logger.info("message is from a relay thread")
+            print("message is from a relay thread")
             host_id = relay_entry["host_id"]
             host_thread_id = relay_entry.get("host_thread_id")
             relay_thread_id = relay_entry.get("relay_thread_id")
@@ -377,9 +375,9 @@ async def on_message(message: discord.Message):
             relay_thread = bot.get_channel(int(relay_thread_id))
 
             if host_thread_id:
-                logger.info("host thread id found")
+                print("host thread id found")
                 if host_thread and relay_thread_id != host_thread_id:
-                    logger.info("host channel found")
+                    print("host channel found")
                     if message.channel.permissions_for(message.guild.me).manage_threads:
                         await asyncio.sleep(2)
                         is_blocked = await is_blocked_user(message.author.name, host_thread.guild.id)
@@ -746,7 +744,7 @@ class GlobalPVPCommands(app_commands.Group):
                         try: 
                             await sent_msg.publish()
                         except Exception as e:
-                            logger.error(f"Error publishing message: {e}")
+                            print(f"Error publishing message: {e}")
 
                 # check if global pvp threads are enabled for this guild
                 if global_pvp_threads_enabled:
@@ -799,7 +797,7 @@ class GlobalPVPCommands(app_commands.Group):
                             await db.relay_threads.insert_one(entry)
 
             except Exception as e:
-                logger.error(f"Error in globalpvp: {e}")
+                print(f"Error in globalpvp: {e}")
 
             
     @ping.error
@@ -1027,6 +1025,7 @@ class SetupView(View):
 
             # Confirm it's saved
             current = await get_setting(interaction.guild.id, "global_pvp_enabled")
+            print(f"Saved value: {current}")  # Debug
 
 
             await interaction.edit_original_response(
@@ -1109,6 +1108,7 @@ class SetupView(View):
 
             # Confirm it's saved
             current = await get_setting(interaction.guild.id, "cross_server_pvp_enabled")   
+            print(f"Saved value: {current}")  # Debug
 
 
             await interaction.edit_original_response(
