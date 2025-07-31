@@ -1403,5 +1403,7 @@ bot.tree.add_command(GlobalPVPCommands(name="globalpvp", description="global/pub
 # VALIDATE YOUR CODE FOR BEST PRACTICES AND NO ERRORS BEFORE ADDING
 # Includes live settings via mongodb that save to database
 
+def run_bot():
+    bot.run(token) 
 
-bot.run(token) #
+run_bot()
