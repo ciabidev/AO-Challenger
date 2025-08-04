@@ -588,8 +588,12 @@ class GlobalSettingsView(discord.ui.View):
             newembed.add_field(name="Host Roles", value="Anyone can host public pvp", inline=False)
         
         if self.message:
-            
-            await self.message.edit(embed=newembed, view=self)
+            try:
+                await self.message.edit(embed=newembed, view=self)
+            except discord.HTTPException as e:
+                logger.error(f"Failed to edit settings message: {e}")
+            except Exception as e:
+                logger.error(f"Unexpected error editing settings message: {e}")
             
 async def location_autocomplete(interaction: discord.Interaction, current: str):
     locations = [
