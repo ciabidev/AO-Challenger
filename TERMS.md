@@ -1,11 +1,15 @@
 pls star pls star pls star tyyy
+
+
+# privacy
+AO Challenger does not store any data about Arcane Odyssey Roblox users other than usernames. Discord data may be stored for public PvP (obviously) and for saving server config.
+
 # terms and ethics
 these terms are applicable only when using the official AO Challenger instance.
-
 This bot is not affiliated with Arcane Odyssey or any of its subsidiaries.
 
 ## user responsibilites
-you (end user) are responsible for what you do with AO Challenger, how you communicate via the bot, and following the Discord TOS. The bot is not responsible for actions of the users.
+You (end user) are responsible for what you do with AO Challenger, how you communicate via the bot, and for following the Discord TOS. The bot is not responsible for the actions of its users.
 
 **if a user is found to be breaking Discord TOS or abusing the bot, they will be banned permanently from using AO Challenger**
 
@@ -20,5 +24,8 @@ To block a user from interacting with your server via Challenger, use `/globalpv
 [Report or appeal a ban](https://tally.so/r/3X6yqV)
 
 If you find a user spamming commands or breaking TOS with the global chat feature, please report them ASAP
+
+## contribute
+coming soon! for now just give me suggestions in the [discord server](https://discord.gg/MBkNjHnVKb)
 
 
