@@ -26,6 +26,6 @@ To block a user from interacting with your server via Challenger, use `/globalpv
 If you find a user spamming commands or breaking TOS with the global chat feature, please report them ASAP
 
 ## contribute
-coming soon! for now just give me suggestions in the discord server:
+coming soon! for now just give me suggestions in the [discord server](https://discord.gg/MBkNjHnVKb)
 
 
