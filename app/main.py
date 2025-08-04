@@ -35,19 +35,19 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 
-# Flask app
-app = Flask(__name__)
+# # Flask app
+# # app = Flask(__name__)
 
-@app.route('/')
-def home():
-    return "Bot is running!", 200
+# @app.route('/')
+# def home():
+#     return "Bot is running!", 200
 
-def run_flask():
-    port = int(os.environ.get("PORT", 10000))  # Render sets the PORT environment variable
-    app.run(host='0.0.0.0', port=port)
+# # def run_flask():
+# #     port = int(os.environ.get("PORT", 10000))  # Render sets the PORT environment variable
+# #     app.run(host='0.0.0.0', port=port)
 
-# Start Flask in a separate thread so it doesn’t block the bot
-threading.Thread(target=run_flask).start()
+# # # Start Flask in a separate thread so it doesn’t block the bot
+# # threading.Thread(target=run_flask).start()
 
 
 
