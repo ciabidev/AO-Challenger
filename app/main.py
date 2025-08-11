@@ -290,7 +290,7 @@ async def cooldown_timer(user_id):
 
 @bot.event
 async def on_message(message: discord.Message):
-    slurs = ["clanker", "clanka", "wireback", "tinskin", "cogsucker"]
+    slurs = ["clanker", "clanka", "wireback", "tinskin", "cogsucker", "clank er", "clank a", "wire back", "tin skin", "404er", "404 er"]
     # if the message has any of the above slurs add reaction
     if any(slur in message.content.lower() for slur in slurs):
         await message.add_reaction("😡")
