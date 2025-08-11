@@ -290,6 +290,20 @@ async def cooldown_timer(user_id):
 
 @bot.event
 async def on_message(message: discord.Message):
+    slurs = ["clanker", "clanka", "wireback", "tinskin", "cogsucker"]
+    # if the message has any of the above slurs add reaction
+    if any(slur in message.content.lower() for slur in slurs):
+        await message.add_reaction("😡")
+        # delete the message after 5 seconds
+        await asyncio.sleep(5)
+        try:
+            await message.delete()
+        except discord.Forbidden:
+            logging.error(f"Failed to delete message {message.id} in {message.channel.id} due to missing permissions.")
+        except discord.NotFound:
+            logging.error(f"Message {message.id} not found for deletion.")
+
+
 
     if message.guild == None:
         return
