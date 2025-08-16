@@ -621,6 +621,208 @@ async def location_autocomplete(interaction: discord.Interaction, current: str):
 
 
 
+async def prepare_global_ping(interaction: discord.Interaction, region: str) -> bool:
+    """
+    Run shared pre-checks and send the single ephemeral confirmation message.
+
+    Returns True if all checks pass (caller may proceed to broadcast), False otherwise.
+    """
+    if await ban_check(interaction):
+        return False
+
+    if not interaction.guild or not interaction.guild.id:
+        await interaction.response.send_message(f"❌ this command is not available in DMs", ephemeral=True)
+        return False
+
+    host_roles = await get_setting(interaction.guild.id, "host_roles")
+    host_roles_formatted = await get_host_roles_formatted(interaction.guild.id)
+
+    if host_roles and not any(role.id in host_roles for role in interaction.user.roles):
+        await interaction.response.send_message(
+            f"❌ you need one of the following to ping for pvp: {host_roles_formatted}",
+            ephemeral=True
+        )
+        return False
+
+    global_pvp_channel_id = await get_setting(interaction.guild.id, f"{region} Channel")
+    if not global_pvp_channel_id or not interaction.guild.get_channel(int(global_pvp_channel_id)):
+        await interaction.response.send_message(
+            f"❌ no global pvp channel set for the region [{region}]. Please tell an admin to assign a channel with `/globalpvp assignregions`",
+            ephemeral=True
+        )
+        return False
+
+    await interaction.response.send_message(
+        f"✅ your pvp announcement is out! Publish extra announcements in your host thread in <#{global_pvp_channel_id}>",
+        ephemeral=True
+    )
+    return True
+
+
+async def handle_global_ping(interaction: discord.Interaction, region: str, where: str, code: str, extra: str = None):
+    """
+    Broadcaster-only function for global pings.
+
+    This function assumes the caller already performed pre-checks (via prepare_global_ping)
+    and already confirmed to the user. It iterates over guilds and performs the broadcast,
+    thread creation and relay/host persistence.
+    """
+    # Broadcast logic (runs in this coroutine). Callers can wrap in create_task to run in background.
+    host_id = int(interaction.user.id)
+    host_thread_id = None
+    relay_entries = []
+
+    for guild in bot.guilds:
+        try:
+            # Check cross-server settings (host guild may disallow cross-server pings)
+            host_cross_server_pvp_enabled = await get_toggle(interaction.guild.id, "cross_server_pvp_enabled")
+            relay_cross_server_pvp_enabled = await get_toggle(guild.id, "cross_server_pvp_enabled")
+
+            # If the host guild disallows cross-server pvp, only send to host guild
+            if not host_cross_server_pvp_enabled and guild.id != interaction.guild.id:
+                continue
+
+            # Skip if this guild has global pvp disabled or user is blocked here
+            global_pvp_enabled = await get_toggle(guild.id, "global_pvp_enabled")
+            if not global_pvp_enabled:
+                continue
+
+            is_blocked = await is_blocked_user(interaction.user.name, guild.id)
+            if is_blocked:
+                continue
+
+            global_pvp_channel_id = await get_setting(guild.id, f"{region} Channel")
+            if not global_pvp_channel_id:
+                continue
+
+            channel = discord.utils.get(guild.text_channels, id=int(global_pvp_channel_id))
+            if not channel:
+                continue
+
+            global_pvp_threads_enabled = await get_toggle(guild.id, "global_pvp_threads_enabled")
+
+            # Get regional role config
+            regional_role_id = await get_setting(guild.id, f"{region} Role")
+            regional_role_mention = f"(<@&{regional_role_id}>)" if regional_role_id else f"({region})\n-# No regional role set for {region}. Please contact a server admin if this isn't intentional"
+            extra_text = f"\nExtra info: {extra}" if extra else ""
+            messagecontent = (
+                f"{interaction.user.mention} is pvping at {where}. User/code: {code} {regional_role_mention} "
+                f"{extra_text}"
+                f"\n-# TIP: Use `/globalpvp ping` to ping an entire region for pvp"
+            )
+            sent_msg = None
+
+            # Cross-server send rules
+            if relay_cross_server_pvp_enabled:
+                sent_msg = await channel.send(messagecontent)
+            elif guild.id == interaction.guild.id:
+                sent_msg = await channel.send(messagecontent)
+
+            # Auto publish if host's cross-server is enabled and channel is announcements
+            if host_cross_server_pvp_enabled and sent_msg and isinstance(channel, discord.TextChannel) and channel.is_news():
+                try:
+                    await sent_msg.publish()
+                except Exception as e:
+                    logger.error(f"Error publishing message: {e}")
+
+            # If threads are enabled for this guild, create thread and store host/relay relationship
+            if global_pvp_threads_enabled and sent_msg:
+                thread = await sent_msg.create_thread(
+                    name=f"{interaction.user.name}'s announcements",
+                    auto_archive_duration=60,
+                    reason="pvp thread"
+                )
+                utc_now = datetime.datetime.now(datetime.timezone.utc)
+                timestamp = int(utc_now.timestamp())
+
+                thread_id = int(thread.id)
+                guild_id = int(guild.id)
+
+                member = guild.get_member(interaction.user.id)
+                if member:
+                    try:
+                        await thread.add_user(member)
+                    except discord.Forbidden:
+                        pass
+
+                if guild.id == interaction.guild.id:
+                    host_thread_id = thread_id
+                    await thread.send(
+                        f"👑 <@{interaction.user.id}> this is your HOST thread. Use this channel for announcements to your guests (and guests in other servers if Cross Server PVP is enabled). Created on <t:{timestamp}:f>. "
+                    )
+                    await db.host_threads.insert_one({
+                        "host_id": int(interaction.user.id),
+                        "host_thread_id": host_thread_id,
+                        "guild_id": guild_id,
+                    })
+                else:
+                    await thread.send(
+                        f"📥 Through this thread you can read announcements or message the host. Created on <t:{timestamp}:f>"
+                    )
+                    relay_entries.append({
+                        "host_id": int(interaction.user.id),
+                        "guild_id": guild_id,
+                        "relay_thread_id": thread_id,
+                    })
+
+            # Once we have a host_thread_id, persist relay entries with that host_thread_id
+            if host_thread_id and relay_entries:
+                for entry in relay_entries:
+                    entry["host_thread_id"] = host_thread_id
+                    await db.relay_threads.insert_one(entry)
+                relay_entries = []  # clear after inserting to avoid duplicates
+
+        except Exception as e:
+            logger.error(f"Error broadcasting global ping to guild {getattr(guild, 'id', 'unknown')}: {e}")
+
+# Top-level convenience commands that predefine the region.
+# Each mirrors the permission checks and response behavior of /globalpvp ping.
+
+async def region_ping_command(interaction: discord.Interaction, region: str, where: str, code: str, extra: str = None):
+    """
+    Shared pre-checks + confirmation used by the region-specific slash commands.
+    """
+    ok = await prepare_global_ping(interaction, region)
+    if not ok:
+        return
+
+    # run broadcaster in background
+    asyncio.create_task(handle_global_ping(interaction, region, where, code, extra))
+
+@app_commands.describe(
+    where="where are you pvping?",
+    code="Roblox username or Elysium code",
+    extra="Any extra information you want to add to the ping message"
+)
+@app_commands.autocomplete(where=location_autocomplete)
+@app_commands.checks.cooldown(1, 200, key=None)
+@bot.tree.command(name="us-pvp", description="ping North America for pvp/elysium")
+async def us_pvp(interaction: discord.Interaction, where: str, code: str, extra: str = None):
+    await region_ping_command(interaction, "North America", where, code, extra)
+
+
+@app_commands.describe(
+    where="where are you pvping?",
+    code="Roblox username or Elysium code",
+    extra="Any extra information you want to add to the ping message"
+)
+@app_commands.autocomplete(where=location_autocomplete)
+@app_commands.checks.cooldown(1, 200, key=None)
+@bot.tree.command(name="eu-pvp", description="ping Europe for pvp/elysium")
+async def eu_pvp(interaction: discord.Interaction, where: str, code: str, extra: str = None):
+    await region_ping_command(interaction, "Europe", where, code, extra)
+
+
+@app_commands.describe(
+    where="where are you pvping?",
+    code="Roblox username or Elysium code",
+    extra="Any extra information you want to add to the ping message"
+)
+@app_commands.autocomplete(where=location_autocomplete)
+@app_commands.checks.cooldown(1, 200, key=None)
+@bot.tree.command(name="as-pvp", description="ping Asia for pvp/elysium")
+async def as_pvp(interaction: discord.Interaction, where: str, code: str, extra: str = None):
+    await region_ping_command(interaction, "Asia", where, code, extra)
 class GlobalPVPCommands(app_commands.Group):
     # show global settings command
 
@@ -670,30 +872,11 @@ class GlobalPVPCommands(app_commands.Group):
         code: str,
         extra: str = None,
     ):
-        if await ban_check(interaction):
+        ok = await prepare_global_ping(interaction, region)
+        if not ok:
             return
 
-        if not interaction.guild.id:
-            await interaction.response.send_message(f"❌ this command is not available in DMs", ephemeral=True)
-            return
-
-        host_roles = await get_setting(interaction.guild.id, "host_roles")
-        host_roles_formatted = await get_host_roles_formatted(interaction.guild.id)
-
-        # check with the new host roles system
-        if host_roles and not any(role.id in host_roles for role in interaction.user.roles):
-            await interaction.response.send_message(f"❌ you need one of the following to ping for pvp: {host_roles_formatted}", ephemeral=True)
-            return 
-        
-        global_pvp_channel_id = await get_setting(interaction.guild.id, f"{region} Channel")
-        if not global_pvp_channel_id or not interaction.guild.get_channel(int(global_pvp_channel_id)):
-            await interaction.response.send_message(f"❌ no global pvp channel set for the region [{region}]. Please tell an admin to assign a channel with `/globalpvp assignregions`", ephemeral=True)
-            return
-        else:
-            await interaction.response.send_message(f"✅ your pvp announcement is out! Publish extra announcements in your host thread in <#{global_pvp_channel_id}>", ephemeral=True)
-
-        
-        asyncio.create_task(self._handle_global_ping(interaction, region, where, code, extra))
+        asyncio.create_task(handle_global_ping(interaction, region, where, code, extra))
 
     async def _handle_global_ping(self, interaction: discord.Interaction, region: str, where: str, code: str, extra: str = None):
         host_id = int(interaction.user.id)
