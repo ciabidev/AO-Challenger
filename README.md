@@ -49,10 +49,19 @@ If you find a player abusing the bot or breaking Discord TOS, please report them
 ## Support the bot
 If you like the bot and want to support it for *free*, you can upvote it via `/upvote`.
 
+## Deployment
+
+The bot is now compatible with Cloudflare Workers. Note that due to Cloudflare Workers limitations, the relay thread system (on_message events) is not supported. Only slash commands are functional.
+
+To deploy:
+1. Install wrangler: `npm install -g wrangler`
+2. Set environment variables in wrangler.toml or via wrangler secret
+3. Run `wrangler deploy`
+
 ## Why can't I add the bot / Why is it so slow?
 
 Four possible reasons:
-1. I accidentally made it private  
+1. I accidentally made it private
 2. For the bot to scale larger and be in more servers, I need to verify my identity. Unfortunately, I'm not old enough to verify my identity on Discord (18+)
 3. The Render free plan for the bot has expired
 4. The bot is being rate-limited. This means someone is spamming the bot, or there's just a lot of activity.
