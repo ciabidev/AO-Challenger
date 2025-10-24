@@ -23,7 +23,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-dev_mode = False
+dev_mode = True
 
 load_dotenv()
 token = os.getenv("DISCORD_TOKEN")
@@ -661,7 +661,7 @@ class GlobalPVPCommands(app_commands.Group):
         region=region_choices,
     )
     @app_commands.autocomplete(where=location_autocomplete)
-    @app_commands.checks.cooldown(1, 200, key=None)
+    @app_commands.checks.cooldown(1, 0, key=None)
     async def ping(
         self,
         interaction: discord.Interaction,
@@ -711,7 +711,6 @@ class GlobalPVPCommands(app_commands.Group):
 
                 # check if global pvp is enabled for this guild
                 global_pvp_enabled = await get_toggle(guild.id, "global_pvp_enabled")
-                blocked_users = await get_blocked_users(guild.id)
                 is_blocked = await is_blocked_user(interaction.user.name, guild.id)
                 
                 if is_blocked:
@@ -725,8 +724,10 @@ class GlobalPVPCommands(app_commands.Group):
                 if not channel:
                     continue
                 
-                global_pvp_threads_enabled = await get_toggle(guild.id, "global_pvp_threads_enabled")
-                
+                # check if global pvp threads are enabled for both the host and relay guilds
+                host_global_pvp_threads_enabled = await get_toggle(interaction.guild.id, "global_pvp_threads_enabled")
+                relay_global_pvp_threads_enabled = await get_toggle(guild.id, "global_pvp_threads_enabled")
+
                 # Get regional role config
                 regional_role_id = await get_setting(guild.id, f"{region} Role")
 
@@ -756,7 +757,7 @@ class GlobalPVPCommands(app_commands.Group):
                             logger.error(f"Error publishing message: {e}")
 
                 # check if global pvp threads are enabled for this guild
-                if global_pvp_threads_enabled:
+                if host_global_pvp_threads_enabled and relay_global_pvp_threads_enabled:
                     thread = await sent_msg.create_thread(
                         name=f"{interaction.user.name}'s announcements",
                         auto_archive_duration=60,
