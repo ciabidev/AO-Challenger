@@ -513,42 +513,24 @@ class GlobalSettingsView(discord.ui.View):
             await self.update_embed()
 
 
-    @discord.ui.button(label="Enable Global PVP", style=discord.ButtonStyle.green, row=2)
-    async def enable_global_pvp_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await set_setting(self.guild_id, "global_pvp_enabled", True)
+    @discord.ui.button(label="Toggle Global PVP", style=discord.ButtonStyle.primary, row=2)  # toggle global pvp
+    async def toggle_global_pvp_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        global_pvp_enabled = await get_toggle(self.guild_id, "global_pvp_enabled")
+        await set_setting(self.guild_id, "global_pvp_enabled", not global_pvp_enabled)
+        await interaction.response.defer(ephemeral=True)  # prevents double send
+        await self.update_embed()
+    
+    @discord.ui.button(label="Toggle Cross Server PVP", style=discord.ButtonStyle.primary, row=3)  # toggle cross server pvp
+    async def toggle_cross_server_pvp_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        cross_server_pvp_enabled = await get_toggle(self.guild_id, "cross_server_pvp_enabled")
+        await set_setting(self.guild_id, "cross_server_pvp_enabled", not cross_server_pvp_enabled)
         await interaction.response.defer(ephemeral=True)  # prevents double send
         await self.update_embed()
 
-
-    @discord.ui.button(label="Disable Global PVP", style=discord.ButtonStyle.red, row=2)
-    async def disable_global_pvp_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await set_setting(self.guild_id, "global_pvp_enabled", False)
-        await interaction.response.defer(ephemeral=True)  # prevents double send
-        await self.update_embed()
-
-    @discord.ui.button(label="Enable Cross Server PVP", style=discord.ButtonStyle.green, row=3)
-    async def enable_cross_server_pvp_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await set_setting(self.guild_id, "cross_server_pvp_enabled", True)
-        await interaction.response.defer(ephemeral=True)  # prevents double send
-        await self.update_embed()
-
-
-    @discord.ui.button(label="Disable Cross Server PVP", style=discord.ButtonStyle.red, row=3)
-    async def disable_cross_server_pvp_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await set_setting(self.guild_id, "cross_server_pvp_enabled", False)
-        await interaction.response.defer(ephemeral=True)  # prevents double send
-        await self.update_embed()
-
-    @discord.ui.button(label="Enable Global PVP Threads", style=discord.ButtonStyle.green, row=4)
-    async def enable_global_pvp_threads_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await set_setting(self.guild_id, "global_pvp_threads_enabled", True)
-        await interaction.response.defer(ephemeral=True)  # prevents double send
-        await self.update_embed()
-
-
-    @discord.ui.button(label="Disable Global PVP Threads", style=discord.ButtonStyle.red, row=4)
-    async def disable_global_pvp_threads_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await set_setting(self.guild_id, "global_pvp_threads_enabled", False)
+    @discord.ui.button(label="Toggle Global PVP Threads", style=discord.ButtonStyle.primary, row=4)  # toggle global pvp threads
+    async def toggle_global_pvp_threads_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        global_pvp_threads_enabled = await get_toggle(self.guild_id, "global_pvp_threads_enabled")
+        await set_setting(self.guild_id, "global_pvp_threads_enabled", not global_pvp_threads_enabled)
         await interaction.response.defer(ephemeral=True)  # prevents double send
         await self.update_embed()
 
@@ -571,22 +553,15 @@ class GlobalSettingsView(discord.ui.View):
             color=discord.Color.blue()
         )
 
-        newembed.set_footer(text="Updates every 10 seconds")
+        newembed.set_footer(text="Updates every 10 seconds. If settings dont update, try using the command again")
         newembed.add_field(name="Regions", value=regions_formatted if regions_formatted else "North America: Not set \n Europe: Not set \n Asia: Not set", inline=False)
-        if global_pvp_enabled:
-            newembed.add_field(name=f"Global PVP?", value="✅ Enabled", inline=False)
-        else:
-            newembed.add_field(name=f"Global PVP?", value="❌ Disabled", inline=False)
+
+        newembed.add_field(name=f"Global PVP?", value=f"Allows your server members to ping an entire region for pvp\n{"✅ Enabled" if global_pvp_enabled else "❌ Disabled"}", inline=False)
+
+        newembed.add_field(name=f"Cross Server PVP?", value=f"Allows your server members to send and recieve pvp pings from other servers. Same with messages in Global PVP Threads\n{"✅ Enabled" if cross_server_pvp_enabled else "❌ Disabled"}", inline=False)
         
-        if cross_server_pvp_enabled:
-            newembed.add_field(name=f"Cross Server PVP?", value="✅ Enabled", inline=False)
-        else:
-            newembed.add_field(name=f"Cross Server PVP?", value="❌ Disabled", inline=False)
-        
-        if global_pvp_threads_enabled:
-            newembed.add_field(name=f"Global PVP Threads?", value="✅ Enabled", inline=False)
-        else:
-            newembed.add_field(name=f"Global PVP Threads?", value="😡 Disabled", inline=False)
+        newembed.add_field(name=f"Global PVP Threads?", value=f"Adds a thread below each pvp ping for host announcements\n{"✅ Enabled" if global_pvp_threads_enabled else "❌ Disabled"}", inline=False)
+            
 
         if host_roles:
             newembed.add_field(name="Host Roles", value=f"Users with any of the following roles can host public pvp: {host_roles_formatted}", inline=False)
