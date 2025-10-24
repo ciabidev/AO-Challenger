@@ -23,7 +23,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-dev_mode = True
+dev_mode = False
 
 load_dotenv()
 token = os.getenv("DISCORD_TOKEN")
@@ -636,7 +636,7 @@ class GlobalPVPCommands(app_commands.Group):
         region=region_choices,
     )
     @app_commands.autocomplete(where=location_autocomplete)
-    @app_commands.checks.cooldown(1, 0, key=None)
+    @app_commands.checks.cooldown(1, 200, key=None)
     async def ping(
         self,
         interaction: discord.Interaction,
