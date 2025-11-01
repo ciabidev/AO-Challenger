@@ -20,22 +20,58 @@ from typing import List
 from motor.motor_asyncio import AsyncIOMotorClient
 import json
 import logging
+# Set up logging configuration for the bot
+
+
+        
+
+"""
+# GLOBAL PVP THREAD RELAY SYSTEM
+# Definitions:
+
+# - Global PVP: The region-based pvp ping system. Will soon change to Regional PVP. Only pings the server the command was used in, unless Cross Server PVP is enabled.
+# - Cross Server PVP: When enabled, the global pvp ping will be sent to other servers.
+
+# - Host Server: The server that hosts the global pvp ping
+# - Relay Server: The server that recieves the global pvp ping. Includes the host server.
+# - Host Thread: Thread where the host can announce stuff to the relay server
+# - Relay Thread: Thread where the relay server can send messages to the host server
+
+# - When a host sends a message in their thread, it's forwarded to all relay threads
+# - When a player sends a message in a relay thread, it's forwarded to the host thread
+
+# - Cross Server are rate-limited, but not moderated. To block a user from pinging, use `/globalpvp blockuser`.
+"""
+
+"""
+Bot Initialization
+This section handles the bot's startup sequence including:
+- Syncing commands
+- Setting up presence/activity
+- Caching channels and threads
+- Clearing old queue entries
+"""
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Development mode flag - affects token and database selection
 dev_mode = False
 
+# Load environment variables and get Discord bot token
 load_dotenv()
 token = os.getenv("DISCORD_TOKEN")
 
 if dev_mode:
     token = os.getenv("TESTING_TOKEN")
 
+# Configure Discord bot intents
+# These determine what events and data the bot can access
 intents = discord.Intents.default()
-intents.message_content = True
-intents.members = True
+intents.message_content = True  # Allow reading message content
+intents.members = True  # Allow accessing member information
 
-# Flask app
+# Flask app for web server functionality
 app = Flask(__name__)
 
 @app.route('/')
@@ -51,84 +87,28 @@ threading.Thread(target=run_flask).start()
 
 
 
+# MongoDB Database Configuration
+# Using motor for asynchronous MongoDB operations
 from motor.motor_asyncio import AsyncIOMotorClient
 
+# Set up MongoDB connection and database
 MONGO_URI = os.getenv("MONGO_URI")
 mongo_client = AsyncIOMotorClient(MONGO_URI)
-db = mongo_client["challenger"]
+db = mongo_client["challenger"]  # Main database for production
 
 if dev_mode:
     db = mongo_client["challenger-testing"]
 
-import pymongo
-# The db variable will be set in on_ready
-# ONLINE/OFFLINE STATUS LOGGING
-
-
-# Init
 bot = commands.Bot(command_prefix='?', intents=intents)
 import discord
-
-# roblox API
-
-usersEndpoint = "https://users.roblox.com/v1/usernames/users"
-
-async def roblox_user_exists(username: str) -> bool:
-    url = "https://users.roblox.com/v1/usernames/users"
-    data = {
-        "usernames": [username],
-        "excludeblockedUsers": False
-    }
-
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=data) as resp:
-            if resp.status != 200:
-                logging.error(f"Failed request: {resp.status}")
-                return False
-            
-            result = await resp.json()
-            ## return the username
-            return result.get("data", [])[0].get("name")
-
-async def get_roblox_user_id(username: str):
-    url = "https://users.roblox.com/v1/usernames/users"
-    data = {
-        "usernames": [username],
-        "excludeblockedUsers": False
-    }
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=data) as resp:
-            if resp.status != 200:
-                logging.error(f"Failed request: {resp.status}")
-                return False
-            
-            result = await resp.json()
-            ## return the id
-            return result.get("data", [])[0].get("id")
-
-async def get_roblox_headshot(user_id: int):
-    url = f"https://thumbnails.roblox.com/v1/users/avatar-headshot"
-    params = {
-        "userIds": str(user_id),
-        "size": "150x150",
-        "format": "Png",
-        "isCircular": "false"
-    }
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, params=params) as response:
-            data = await response.json()
-            return data['data'][0]['imageUrl']
-        
-
-
-# bot initialization
-
-
 @bot.event
 async def on_ready():
-    logging.info(f'live on {bot.user.name} - {bot.user.id}')
+    """
+    Bot initialization
+    """
+    logging.info(f'live on {bot.user.name} - {bot.user.id}') 
 
-    activity = discord.Activity(type=discord.ActivityType.listening, name="/findpvp /help")
+    activity = discord.Activity(type=discord.ActivityType.listening, name="/findpvp /globalpvp /help") # display useful commands in bot activity. 
     await bot.change_presence(activity=activity)
 
     try:
@@ -138,7 +118,6 @@ async def on_ready():
         logging.info(f"Error syncing commands: {e}")
 
     # Cache all text channels and threads from all guilds
-
 
     for guild in bot.guilds:
         # Await the coroutine properly to get the list of active threads
@@ -153,53 +132,203 @@ async def on_ready():
     # remove all queue entries on start
     await db.queue.delete_many({})
 
+"""
+
+MAIN BOT CODE
+
+"""
+
+"""
+Roblox API Functions
+"""
+    
+
+
+# Roblox API Integration
+# This section handles all Roblox-related functionality including user verification
+# and profile image fetching. The functions were moved into the `RobloxAPI` class
+# to group related behavior and make testing/maintenance easier.
+
+class RobloxAPI:
+    """
+    Helper class for Roblox API operations.
+
+    Methods are async and create short-lived aiohttp sessions per call (same behavior
+    as the previous standalone functions). This keeps the refactor minimal and
+    backwards-compatible via the wrapper functions defined below.
+    """
+
+    def __init__(self):
+        # Endpoint for username -> id/metadata lookup
+        self.users_endpoint = "https://users.roblox.com/v1/usernames/users"
+        # Endpoint for fetching headshot thumbnails
+        self.headshot_url = "https://thumbnails.roblox.com/v1/users/avatar-headshot"
+
+    async def user_exists(self, username: str) -> str | None:
+        """
+        Check whether a Roblox user exists by username.
+
+        Args:
+            username (str): Roblox username to check
+
+        Returns:
+            str | None: The canonical username if found, otherwise None
+        """
+        data = {
+            "usernames": [username],
+            "excludeblockedUsers": False
+        }
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(self.users_endpoint, json=data) as resp:
+                if resp.status != 200:
+                    logging.error(f"Roblox user lookup failed with status {resp.status}")
+                    return None
+                result = await resp.json()
+                return result.get("data", [])[0].get("name")
+
+    async def get_user_id(self, username: str) -> int | None:
+        """
+        Retrieve the Roblox user id for a given username.
+
+        Args:
+            username (str): Roblox username
+
+        Returns:
+            int | None: The numeric user id if found, otherwise None
+        """
+        data = {
+            "usernames": [username],
+            "excludeblockedUsers": False
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.post(self.users_endpoint, json=data) as resp:
+                if resp.status != 200:
+                    logging.error(f"Roblox user id lookup failed with status {resp.status}")
+                    return None
+                result = await resp.json()
+                return result.get("data", [])[0].get("id")
+
+    async def get_headshot(self, user_id: int) -> str | None:
+        """
+        Retrieve a PNG headshot URL for a Roblox user id.
+
+        Args:
+            user_id (int): Roblox user id
+
+        Returns:
+            str | None: URL to the headshot image if available, otherwise None
+        """
+        params = {
+            "userIds": str(user_id),
+            "size": "150x150",
+            "format": "Png",
+            "isCircular": "false"
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.get(self.headshot_url, params=params) as response:
+                if response.status != 200:
+                    logging.error(f"Roblox headshot request failed with status {response.status}")
+                    return None
+                data = await response.json()
+                return data.get('data', [])[0].get('imageUrl')
+
+# Instantiate a module-level client for convenience
+roblox_api = RobloxAPI()
+
+# Backwards-compatible wrapper functions (preserve original names used elsewhere)
+async def roblox_user_exists(username: str) -> bool:
+    """
+    Wrapper that calls RobloxAPI.user_exists. Returns the username string
+    if found, otherwise None. Kept for compatibility with existing call sites.
+    """
+    return await roblox_api.user_exists(username)
+
+
+async def get_roblox_user_id(username: str):
+    """Wrapper that returns the numeric Roblox user id for a username."""
+    return await roblox_api.get_user_id(username)
+
+
+async def get_roblox_headshot(user_id: int):
+    """Wrapper that returns the headshot image URL for a Roblox user id."""
+    return await roblox_api.get_headshot(user_id)
 
 # whenever someone uses a command, print the user's id and name
 @bot.event
 async def on_app_command_completion(interaction: discord.Interaction, command: discord.app_commands.Command):
+    """
+    Event handler for when a slash command is completed. Logs the user and command information.
+
+    Args:
+        interaction (discord.Interaction): The interaction that triggered the command
+        command (discord.app_commands.Command): The command that was executed
+    """
     user = interaction.user
     logger.info(f"User {user.id} ({user.name}) used slash command '/{command.name}'")
 
-# GLOBAL PVP THREAD RELAY
-# Host sends a message in host thread which is forwarded to all relay threads
-# If a player sends a message in a relay thread, it is forwarded to the host thread
 
-thread_cache = {}  # global cache: {thread_id (int): discord.Thread or discord.TextChannel}
+thread_cache = {}
 
+# User management functions for blocking and banning
 async def get_blocked_users(guild_id: int):
+    """
+    Gets a list of blocked users from the database for a given guild
+
+    Args:
+        guild_id (int): The ID of the guild to get the blocked users for
+
+    Returns:
+        list: A list of blocked users
+    """
+
+    # get all blocked users from the database
     cursor = db.blocks.find({"guild_id": guild_id})
     blocked_users = await cursor.to_list()
     userlist = []
 
     now = datetime.datetime.now(datetime.timezone.utc)
 
+    # iterate through blocked users and check if they are still blocked
     for user in blocked_users:
         try:
             created_at = datetime.datetime.fromisoformat(user["created_at"])
             duration = user.get("duration", 0)
 
-            if now - created_at > datetime.timedelta(days=duration):
+            if now - created_at > datetime.timedelta(days=duration): # check if the user is still blocked
                 await db.blocks.delete_one({"username": user["username"], "guild_id": guild_id})
             else:
-                userlist.append(user)
+                userlist.append(user) # add the user to the list if they are still blocked
 
         except KeyError as e:
             continue
     return userlist
-
-
-
 async def is_blocked_user(username: str, guild_id: int):
-    blocked_users = await get_blocked_users(guild_id)
-    for user in blocked_users: 
+    """
+    Checks if a user is blocked from interacting with a guild through AO Challenger
+
+    Args:
+        username (str): The username of the user to check
+        guild_id (int): The ID of the guild to check
+
+    Returns:
+        bool: true if the user is blocked, false otherwise
+    """
+    blocked_users = await get_blocked_users(guild_id) # get all blocked users from the database
+    for user in blocked_users: # iterate through blocked users and check if the username matches
         if user["username"] == username:
             logging.info(f"user {user} is blocked")
             return True
-            break
 
     return False
 
 async def get_banned_users():
+    """
+    Gets a list of users banned from using AO Challenger from the database
+
+    Returns:
+        list: A list of banned users
+    """
     cursor = db.bans.find({})
     banned_users = await cursor.to_list()
     userlist = []
@@ -225,17 +354,28 @@ async def is_banned_user(user_id):
             return True
             break
 
-# custom check class for every command if the user is banned
 async def ban_check(interaction: discord.Interaction) -> bool:
+    """
+    Custom check for every command if the user is banned. Must be used at the top of every command
+    """
     if await is_banned_user(interaction.user.id):  # make sure this is an async function if needed
         await interaction.response.send_message(
-            "❌ You are banned from using the bot. Appeal here: https://tally.so/r/3X6yqV",
+            "❌ You are banned from using the bot. Appeal here: https://tally.so/r/3X6yqV", # i need to add a "Reason: " section to this so the user knows why they were banned. will probably be in the bannned users db
             ephemeral=True
         )
         return True  # block the command
     return False  # allow command
 
 async def get_relay_threads(host_id: int):
+    """
+    Gets the relay threads for a host thread
+
+    Args:
+        host_id (int): The ID of the host thread
+
+    Returns:
+        dict: A dictionary of relay threads
+    """
     config = await db.relay_threads.find_one({"host_id": int(host_id)})
     if not config:
         return None
@@ -245,6 +385,16 @@ relay_threads = {}
 
 @bot.event
 async def get_channel_cached(channel_id: int):
+    """
+    Gets a channel from the cache, or fetches it from Discord if not cached.
+    Improves performance by avoiding unnecessary API calls.
+
+    Args:
+        channel_id (int): The ID of the channel to get
+
+    Returns:
+        discord.TextChannel or None: The channel if found, None if not found
+    """
     if channel_id in thread_cache:
         logging.info(f"Returning cached channel {channel_id}")
         return thread_cache[channel_id]
@@ -266,20 +416,38 @@ async def get_channel_cached(channel_id: int):
 
 @bot.event
 async def on_thread_create(thread):
+    """
+    Event handler for when a thread is created.
+    Adds the thread to cache and sets a 5-minute slowmode delay.
+
+    Args:
+        thread (discord.Thread): The thread that was created
+    """
     thread_cache[thread.id] = thread
     # set the message cooldown of the thread to 5 minutes
     await thread.edit(slowmode_delay=5) 
 @bot.event
 async def on_thread_delete(thread):
+    """
+    Event handler for when a thread is deleted.
+    Removes the thread from the cache.
+
+    Args:
+        thread (discord.Thread): The thread that was deleted
+    """
     thread_cache.pop(thread.id, None)
 
 @bot.event
 async def on_guild_channel_delete(channel):
     thread_cache.pop(channel.id, None)
 
-
+"""
+RATE LIMITING
+Prevents users from overloading the bot with requests
+"""
 rate_limited_users = {}
 
+# Duration of cooldown in seconds for rate-limited users
 COOLDOWN_DURATION = 5  # in seconds
 
 async def cooldown_timer(user_id):
@@ -427,14 +595,17 @@ async def debug_relays(ctx):
             "\n".join(relay_list)
         )
 
-
-
-
-# MAIN BOT CODE
-
-# configurations
-
 async def get_setting(guild_id: int, name: str):
+    """
+    Retrieves a specific setting for a guild from the database.
+
+    Args:
+        guild_id (int): The ID of the guild to get the setting for
+        name (str): The name of the setting to retrieve
+
+    Returns:
+        Any: The value of the setting, or None if not found
+    """
     config = await db.server_config.find_one({"guild_id": int(guild_id), "name": name})
     if not config:
         logging.info(f"No {name} set for guild {guild_id}")
@@ -442,6 +613,16 @@ async def get_setting(guild_id: int, name: str):
     return config["value"]
 
 async def get_toggle(guild_id: int, name: str):
+    """
+    Retrieves a boolean toggle setting for a guild.
+
+    Args:
+        guild_id (int): The ID of the guild to get the toggle for
+        name (str): The name of the toggle setting
+
+    Returns:
+        bool: True if the setting exists and is enabled, False otherwise
+    """
     config = await db.server_config.find_one({"guild_id": int(guild_id), "name": name})
     if not config or config["value"] is False:
         return False
@@ -460,7 +641,10 @@ async def get_guild_from_id(guild_id: int):
         guild = await bot.fetch_guild(int(guild_id))  # ✅ this is awaitable
     return guild
 
+# List of supported regions for PVP matchmaking
 regions = ["North America", "Europe", "Asia"]
+
+# Helper function to format region settings for display
 async def get_regions_formatted(guild_id: int) -> dict:
     formatted_regions = ""
     for region in regions:
@@ -484,28 +668,30 @@ async def get_host_roles_formatted(guild_id: int) -> dict:
     return formatted_host_roles
 
 region_choices = [app_commands.Choice(name=region, value=region) for region in regions]
-            
+"""        
+Global Settings View - Manage all global settings in one place with simple buttons
+Features:
+- Displays the current settings in an updating embed
+- Toggle global PVP using buttons
+- Toggle cross-server PVP
+- Toggle global PVP threads
+- View and manage host roles
+- View regional settings
+"""
 class GlobalSettingsView(discord.ui.View):
-   # why cant I change more settings?
-    # channel and role selections have been removed for optimization and ease of use
-    ## discord only allows 25 options per select
-    ## adding pagination to each select would lead to the code being too complex 
-    ## until discord allows more than 25 options per select, this is staying
-
-    #  def __init__(self, channels: list[SelectOption], roles: list[SelectOption], guild_id: int):
+    # Note: Channel and role selections have been removed for optimization and ease of use
+    # Discord only allows 25 options per select menu, and adding pagination would increase complexity
+    # This limitation will be revisited when Discord increases the option limit
 
     def __init__(self, guild_id: int):
         super().__init__()
         self.regional_roles = "Not configured"  # default value
         self.host_roles = "Not configured, everyone by default"
-        # self.add_item(GlobalChannelSelect(channels, self))
-        # self.add_item(HostRoleSelect(roles, self))
+
         self.guild_id = guild_id
-        self.message = None  # Will be assigned after sending
+        self.message = None  
         asyncio.create_task(self.auto_reload())
-    # @discord.ui.button(label="Set Regional PVP Roles", style=discord.ButtonStyle.primary, row=1)
-    # async def set_regional_roles(self, interaction: discord.Interaction, button: discord.ui.Button):
-    #     await interaction.response.edit_message(view=RegionButtons(self.guild_id, self))
+
 
     async def auto_reload(self):
         while True:
@@ -537,7 +723,7 @@ class GlobalSettingsView(discord.ui.View):
     async def update_embed(self):
         guild = await get_guild_from_id(self.guild_id)
             
-        cross_server_pvp_enabled = await get_toggle(self.guild_id, "cross_server_pvp_enabled")
+        cross_server_pvp_enabled = await get_toggle(self.guild_id, "cross_server_pvp_enabled") 
         global_pvp_enabled = await get_toggle(self.guild_id, "global_pvp_enabled")
         global_pvp_threads_enabled = await get_toggle(self.guild_id, "global_pvp_threads_enabled")
 
@@ -577,6 +763,9 @@ class GlobalSettingsView(discord.ui.View):
                 logger.error(f"Unexpected error editing settings message: {e}")
             
 async def location_autocomplete(interaction: discord.Interaction, current: str):
+    """
+    Autocomplete for in game locations
+    """
     locations = [
         "South of Caitara",
         "Elysium",
@@ -597,6 +786,7 @@ async def location_autocomplete(interaction: discord.Interaction, current: str):
 
 
 class GlobalPVPCommands(app_commands.Group):
+    
     # show global settings command
 
 
@@ -605,11 +795,13 @@ class GlobalPVPCommands(app_commands.Group):
     @app_commands.checks.has_permissions(manage_channels=True)
     async def globalpvpsettings(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)  # <-- Respond immediately to avoid expiration
-                
+        
+        # check if the user is in a guild
         if not interaction.guild.id:
             await interaction.response.send_message(f"❌ this command is not available in DMs", ephemeral=True)
             return
         
+        # create the settings view
         embed = discord.Embed(
             title="Loading...",
             description="Use the buttons below to configure your preferences.",
@@ -647,7 +839,7 @@ class GlobalPVPCommands(app_commands.Group):
     ):
         if await ban_check(interaction):
             return
-
+        
         if not interaction.guild.id:
             await interaction.response.send_message(f"❌ this command is not available in DMs", ephemeral=True)
             return
@@ -655,22 +847,26 @@ class GlobalPVPCommands(app_commands.Group):
         host_roles = await get_setting(interaction.guild.id, "host_roles")
         host_roles_formatted = await get_host_roles_formatted(interaction.guild.id)
 
-        # check with the new host roles system
+        # check if the user has any of the host roles
         if host_roles and not any(role.id in host_roles for role in interaction.user.roles):
             await interaction.response.send_message(f"❌ you need one of the following to ping for pvp: {host_roles_formatted}", ephemeral=True)
             return 
         
+        # check if the user has a global pvp channel set for the region
         global_pvp_channel_id = await get_setting(interaction.guild.id, f"{region} Channel")
         if not global_pvp_channel_id or not interaction.guild.get_channel(int(global_pvp_channel_id)):
             await interaction.response.send_message(f"❌ no global pvp channel set for the region [{region}]. Please tell an admin to assign a channel with `/globalpvp assignregions`", ephemeral=True)
             return
         else:
-            await interaction.response.send_message(f"✅ your pvp announcement is out! Publish extra announcements in your host thread in <#{global_pvp_channel_id}>", ephemeral=True)
+            await interaction.response.send_message(f"✅ your pvp announcement is out! Publish extra announcements in your host thread in <#{global_pvp_channel_id}>", ephemeral=True) # todo: improve this system. even if theres an error sending out the announcement it still shows this message (look below)
 
         
         asyncio.create_task(self._handle_global_ping(interaction, region, where, code, extra))
 
     async def _handle_global_ping(self, interaction: discord.Interaction, region: str, where: str, code: str, extra: str = None):
+        
+        if ban_check(interaction):
+            return
         host_id = int(interaction.user.id)
         host_thread_id = None
         relay_entries = []
@@ -717,10 +913,11 @@ class GlobalPVPCommands(app_commands.Group):
                 sent_msg = None
                 
                 # cross server check
-
+                
+                
                 if relay_cross_server_pvp_enabled:
                     sent_msg = await channel.send(messagecontent)                        
-                elif guild.id == interaction.guild.id: # relay servers includes the host server so we have to check for this
+                elif guild.id == interaction.guild.id: # relay servers includes the host server so we have to check for this. If we don't check for this, the message wont be announced at all if cross_server_pvp is disabled on the host's server.
                     sent_msg = await channel.send(messagecontent)
                 
                 # also Auto Publish the sent message if the channel is a Discord Announcement Channel
@@ -972,11 +1169,11 @@ class QueueView(discord.ui.View):
 
 
 
-
-# SERVER SETUP
-
+"""
+Easy server setup for admins
+"""
 class SetupView(View):
-    # this command uses self.guild instead of self.guild_id, be careful
+    # this class uses "guild" instead of "guild.id"
     def __init__(self, guild: discord.Guild):
         super().__init__(timeout=300)
         self.guild = guild
@@ -1171,17 +1368,20 @@ async def invite(interaction: discord.Interaction):
         invite = f.read()
     await interaction.response.send_message(f"[invite me to your server]({invite})", embed=None)
 
+# support command
 @bot.tree.command(name="support", description="ask for help or suggest something")
 async def support(interaction: discord.Interaction):
     await interaction.response.send_message(f"[Support and Suggestions](https://tally.so/r/3X6yqV)", ephemeral=True)
 
+# upvote command
 @bot.tree.command(name="upvote", description="suport the bot for FREE by upvoting it on top.gg")
 async def upvote(interaction: discord.Interaction):
     # get invite.txt
     with open("app/upvote.txt", "r") as f:
         upvote = f.read()
     await interaction.response.send_message(f"[upvote me on top.gg]({upvote})")
-    
+
+# findpvp command
 @bot.tree.command(name="findpvp", description="Join a queue to find a player to pvp")
 
 @app_commands.describe(
@@ -1194,7 +1394,7 @@ async def upvote(interaction: discord.Interaction):
 )
 
 @app_commands.autocomplete(where=location_autocomplete)
-async def queue_command(interaction: discord.Interaction, username: str, region: str, extra: str = None, where: str = None):
+async def findpvp(interaction: discord.Interaction, username: str, region: str, extra: str = None, where: str = None):
     if await ban_check(interaction):
         return
     
@@ -1309,6 +1509,7 @@ async def queue_command(interaction: discord.Interaction, username: str, region:
                 await msg.delete()
                 break
 
+# banuser command
 @bot.tree.command(name="banuser", description="Ban a user from using the bot")
 @app_commands.describe(
     user_id="Discord User ID",
@@ -1376,19 +1577,6 @@ async def listbanned(
 
 # register globalpvp class
 bot.tree.add_command(GlobalPVPCommands(name="globalpvp", description="global/public pvp management"))
-
-# Global Settings View - Manage all global settings in one place with simple buttons
-## features:
-## displays the current settings in an updating embed
-## set the global pvp channel using a button and dropdown with pagination
-## set the regional ping roles using the same dropdown structure
-## disable/enable global pvp using a button
-## choose who can ping globally for pvp (everyone by default)
-# should be fully functional and senior developer tier quality
-# ALL FUNCTIONS, VARIABLES, CLAsiaSES ETC. THAT YOU USE MUST BE DEFINED FIRST
-# VALIDATE YOUR CODE FOR BEST PRACTICES AND NO ERRORS BEFORE ADDING
-# Includes live settings via mongodb that save to database
-
 def run_bot():
     bot.run(token) 
 
