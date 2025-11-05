@@ -56,7 +56,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Development mode flag - affects token and database selection
-dev_mode = False
+dev_mode = True
 
 # Load environment variables and get Discord bot token
 load_dotenv()
@@ -865,7 +865,7 @@ class GlobalPVPCommands(app_commands.Group):
 
     async def _handle_global_ping(self, interaction: discord.Interaction, region: str, where: str, code: str, extra: str = None):
         
-        if ban_check(interaction):
+        if await ban_check(interaction):
             return
         host_id = int(interaction.user.id)
         host_thread_id = None
