@@ -56,7 +56,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Development mode flag - affects token and database selection
-dev_mode = True
+dev_mode = os.getenv("DEV_MODE") == "true"
 
 # Load environment variables and get Discord bot token
 load_dotenv()
