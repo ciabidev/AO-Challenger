@@ -1,24 +1,17 @@
 import discord
-from discord.ui import View, Select
-import requests
+from discord.ui import View
 import threading
 import os
 import asyncio
-import csv
-import io
 import datetime
 import aiohttp
 from discord.ext import commands
 from discord import app_commands
-from discord import Client, SelectOption
-from discord.app_commands import checks
-from discord import Interaction, SelectOption, TextChannel, ButtonStyle
-from discord.ui import View, Select, Button
+from discord import Interaction, ButtonStyle
+from discord.ui import View, Button
 from dotenv import load_dotenv
 from flask import Flask
-from typing import List
 from motor.motor_asyncio import AsyncIOMotorClient
-import json
 import logging
 # Set up logging configuration for the bot
 
@@ -414,18 +407,7 @@ async def get_channel_cached(channel_id: int):
         return None
 
 
-@bot.event
-async def on_thread_create(thread):
-    """
-    Event handler for when a thread is created.
-    Adds the thread to cache and sets a 5-minute slowmode delay.
-
-    Args:
-        thread (discord.Thread): The thread that was created
-    """
-    thread_cache[thread.id] = thread
-    # set the message cooldown of the thread to 5 minutes
-    await thread.edit(slowmode_delay=5) 
+ 
 @bot.event
 async def on_thread_delete(thread):
     """
@@ -937,7 +919,11 @@ class GlobalPVPCommands(app_commands.Group):
                     )
                     utc_now = datetime.datetime.now(datetime.timezone.utc)
                     timestamp = int(utc_now.timestamp())
-
+                    
+                    # add the thread to thread_cache
+                    thread_cache[thread.id] = thread
+                    # set the message cooldown of the thread to 5 seconds
+                    await thread.edit(slowmode_delay=5) 
                     
                     thread_id = int(thread.id)
                     guild_id = int(guild.id)
