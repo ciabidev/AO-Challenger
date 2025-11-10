@@ -4,6 +4,7 @@ import threading
 import os
 import asyncio
 import datetime
+import math
 import aiohttp
 from discord.ext import commands
 from discord import app_commands
@@ -49,14 +50,16 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Development mode flag - affects token and database selection
-dev_mode = os.getenv("DEV_MODE") == "true"
+load_dotenv()  # Load environment variables first before checking DEV_MODE
+
+dev_mode = os.getenv("DEV_MODE", "false").lower() == "true"  # Default to false if not set
 
 # Load environment variables and get Discord bot token
-load_dotenv()
-token = os.getenv("DISCORD_TOKEN")
 
 if dev_mode:
     token = os.getenv("TESTING_TOKEN")
+else:
+    token = os.getenv("DISCORD_TOKEN")
 
 # Configure Discord bot intents
 # These determine what events and data the bot can access
@@ -99,6 +102,7 @@ async def on_ready():
     """
     Bot initialization
     """
+    logging.info(f"dev mode: {dev_mode}")
     logging.info(f'live on {bot.user.name} - {bot.user.id}') 
 
     activity = discord.Activity(type=discord.ActivityType.listening, name="/findpvp /globalpvp /help") # display useful commands in bot activity. 
@@ -117,7 +121,8 @@ async def on_ready():
         threads = await guild.active_threads()
 
         for thread in threads:
-            thread_cache[thread.id] = thread
+            if thread.owner_id == bot.user.id:
+                thread_cache[thread.id] = thread
         
 
     logging.info(f"Cached {len(thread_cache)} possible pvp channels/threads")
@@ -438,6 +443,8 @@ async def cooldown_timer(user_id):
         await asyncio.sleep(1)
     rate_limited_users.pop(user_id, None)
 
+allowed_mentions = discord.AllowedMentions(everyone=False, roles=False, users=True)
+
 @bot.event
 async def on_message(message: discord.Message):
     slurs = ["clanker", "clanka", "wireback", "tinskin", "cogsucker", "clank er", "clank a", "wire back", "tin skin", "404er", "404 er"]
@@ -516,7 +523,7 @@ async def on_message(message: discord.Message):
                             await relay_thread.send(f"This host `{message.author.name}` is blocked from interacting with your server" 
                                                     f"\n-# Please contact a server admin if you believe this is an error.")
                             return
-                        await relay_thread.send(f"👑 Host: {message.content}")
+                        await relay_thread.send(f"👑 Host: {message.content}", allowed_mentions=allowed_mentions )
                         await relay_thread.edit(slowmode_delay=5)
                         await host_thread.edit(slowmode_delay=5)
 
@@ -541,7 +548,7 @@ async def on_message(message: discord.Message):
                                                    f"\n-# Please contact a server admin if you believe this is an error.")
                             return
 
-                        await host_thread.send(f"`{message.guild.name}` `{message.author}`: {message.content}")
+                        await host_thread.send(f"`{message.guild.name}` `{message.author}`: {message.content}", allowed_mentions=allowed_mentions )
                         await relay_thread.edit(slowmode_delay=5)
                         await host_thread.edit(slowmode_delay=5)
 
@@ -590,7 +597,6 @@ async def get_setting(guild_id: int, name: str):
     """
     config = await db.server_config.find_one({"guild_id": int(guild_id), "name": name})
     if not config:
-        logging.info(f"No {name} set for guild {guild_id}")
         return None
     return config["value"]
 
@@ -679,7 +685,9 @@ class GlobalSettingsView(discord.ui.View):
         while True:
             await asyncio.sleep(10)
             await self.update_embed()
-
+            # stop if command timed out
+            if self.message is None:
+                break
 
     @discord.ui.button(label="Toggle Global PVP", style=discord.ButtonStyle.primary, row=2)  # toggle global pvp
     async def toggle_global_pvp_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -766,12 +774,17 @@ async def location_autocomplete(interaction: discord.Interaction, current: str):
 
 
 
+# Track the last time a global PVP ping was sent
+global_pvp_ping_last_run = None
 
 class GlobalPVPCommands(app_commands.Group):
     
     # show global settings command
 
-
+    """
+    Settings command
+    Allows users to edit the current global PVP settings.
+    """
     @app_commands.command(name="settings", description="edit the current global settings.")
     
     @app_commands.checks.has_permissions(manage_channels=True)
@@ -796,7 +809,11 @@ class GlobalPVPCommands(app_commands.Group):
         await view.update_embed()
 
 
-    # ping for global pvp
+    """"
+    PING COMMAND
+    Allows users to ping an entire region for pvp/elysium
+    """
+
     @app_commands.command(name="ping", description="ping an entire region for pvp/elysium")
     
     @app_commands.describe(
@@ -810,7 +827,6 @@ class GlobalPVPCommands(app_commands.Group):
         region=region_choices,
     )
     @app_commands.autocomplete(where=location_autocomplete)
-    @app_commands.checks.cooldown(1, 200, key=None)
     async def ping(
         self,
         interaction: discord.Interaction,
@@ -834,18 +850,29 @@ class GlobalPVPCommands(app_commands.Group):
             await interaction.response.send_message(f"❌ you need one of the following to ping for pvp: {host_roles_formatted}", ephemeral=True)
             return 
         
-        # check if the user has a global pvp channel set for the region
+        # check if the user has a global pvp channel set for the region and check permissions
+        if global_pvp_ping_last_run != None and datetime.datetime.now(datetime.timezone.utc) - global_pvp_ping_last_run < datetime.timedelta(minutes=20):
+            await interaction.response.send_message(f"❌ you can only ping for pvp every 20 minutes. Please wait {math.ceil((20 - (datetime.datetime.now(datetime.timezone.utc) - global_pvp_ping_last_run).seconds) / 60)} minutes before pinging again.", ephemeral=True)
+
+            # tell the user to wait the remaining minutes before pinging again
         global_pvp_channel_id = await get_setting(interaction.guild.id, f"{region} Channel")
+
+        global_pvp_channel = interaction.guild.get_channel(int(global_pvp_channel_id))
+
         if not global_pvp_channel_id or not interaction.guild.get_channel(int(global_pvp_channel_id)):
             await interaction.response.send_message(f"❌ no global pvp channel set for the region [{region}]. Please tell an admin to assign a channel with `/globalpvp assignregions`", ephemeral=True)
             return
-        else:
-            await interaction.response.send_message(f"✅ your pvp announcement is out! Publish extra announcements in your host thread in <#{global_pvp_channel_id}>", ephemeral=True) # todo: improve this system. even if theres an error sending out the announcement it still shows this message (look below)
+        
+        if not global_pvp_channel.permissions_for(interaction.guild.me).send_messages or not global_pvp_channel.permissions_for(interaction.guild.me).read_message_history or not global_pvp_channel.permissions_for(interaction.guild.me).send_messages_in_threads or not global_pvp_channel.permissions_for(interaction.guild.me).manage_threads:
+            await interaction.response.send_message(f"I am missing one or more of the following permissions in <#{global_pvp_channel_id}>: `Send Messages`, `Read Message History`, `Send Messages in Threads`, `Manage Threads`. I need these permissions for global pvp pings. Please contact a server admin if this isn't intentional", ephemeral=True)
+            return
 
         
         asyncio.create_task(self._handle_global_ping(interaction, region, where, code, extra))
 
+
     async def _handle_global_ping(self, interaction: discord.Interaction, region: str, where: str, code: str, extra: str = None):
+        global global_pvp_ping_last_run
         
         if await ban_check(interaction):
             return
@@ -898,9 +925,9 @@ class GlobalPVPCommands(app_commands.Group):
                 
                 
                 if relay_cross_server_pvp_enabled:
-                    sent_msg = await channel.send(messagecontent)                        
+                    sent_msg = await channel.send(messagecontent, allowed_mentions=allowed_mentions )                        
                 elif guild.id == interaction.guild.id: # relay servers includes the host server so we have to check for this. If we don't check for this, the message wont be announced at all if cross_server_pvp is disabled on the host's server.
-                    sent_msg = await channel.send(messagecontent)
+                    sent_msg = await channel.send(messagecontent, allowed_mentions=allowed_mentions )
                 
                 # also Auto Publish the sent message if the channel is a Discord Announcement Channel
                 if host_cross_server_pvp_enabled:
@@ -964,17 +991,16 @@ class GlobalPVPCommands(app_commands.Group):
                             entry["host_thread_id"] = host_thread_id
                             await db.relay_threads.insert_one(entry)
 
+            
             except Exception as e:
                 logger.error(f"Error in globalpvp: {e}")
+        await interaction.response.send_message(f"✅ your pvp announcement is out! Publish extra announcements in your host thread in <#{global_pvp_channel_id}>", ephemeral=True) # todo: improve this system. even if theres an error sending out the announcement it still shows this message (look below)  
+        global_pvp_ping_last_run = datetime.datetime.now(datetime.timezone.utc)
 
             
     @ping.error
     async def ping_error(self, interaction: discord.Interaction, error):
-        if isinstance(error, app_commands.errors.CommandOnCooldown):
-            await interaction.response.send_message(
-                f"Someone already pinged for pvp in the last {error.cooldown.per} seconds. Please wait before pinging again.",
-                ephemeral=True
-            )
+        await interaction.response.send_message(f"error: {error}", ephemeral=True)
 
     @app_commands.command(name="blockuser", description="Block a user from interacting with your server")
     @app_commands.describe(
