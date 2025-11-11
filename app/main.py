@@ -774,8 +774,10 @@ async def location_autocomplete(interaction: discord.Interaction, current: str):
 
 
 
-# Track the last time a global PVP ping was sent
-global_pvp_ping_last_run = None
+# Track the last time each user sent a global PVP ping
+# Format: {user_id (int): datetime.datetime}
+# This enforces per-user cooldowns, not global cooldowns
+global_pvp_ping_last_run = {}
 
 class GlobalPVPCommands(app_commands.Group):
     
@@ -851,10 +853,13 @@ class GlobalPVPCommands(app_commands.Group):
             return 
         
         # check if the user has a global pvp channel set for the region and check permissions
-        if global_pvp_ping_last_run != None and datetime.datetime.now(datetime.timezone.utc) - global_pvp_ping_last_run < datetime.timedelta(minutes=20):
-            await interaction.response.send_message(f"❌ you can only ping for pvp every 20 minutes. Please wait {math.ceil((20 - (datetime.datetime.now(datetime.timezone.utc) - global_pvp_ping_last_run).seconds) / 60)} minutes before pinging again.", ephemeral=True)
-
-            # tell the user to wait the remaining minutes before pinging again
+        user_id = interaction.user.id
+        if user_id in global_pvp_ping_last_run and datetime.datetime.now(datetime.timezone.utc) - global_pvp_ping_last_run[user_id] < datetime.timedelta(minutes=20):
+            time_elapsed = datetime.datetime.now(datetime.timezone.utc) - global_pvp_ping_last_run[user_id]
+            remaining_seconds = (datetime.timedelta(minutes=20) - time_elapsed).total_seconds()
+            remaining_minutes = math.ceil(remaining_seconds / 20)
+            await interaction.response.send_message(f"❌ Please wait {remaining_minutes} minutes before pinging again.", ephemeral=True)
+            return
         global_pvp_channel_id = await get_setting(interaction.guild.id, f"{region} Channel")
 
         global_pvp_channel = interaction.guild.get_channel(int(global_pvp_channel_id))
@@ -863,8 +868,8 @@ class GlobalPVPCommands(app_commands.Group):
             await interaction.response.send_message(f"❌ no global pvp channel set for the region [{region}]. Please tell an admin to assign a channel with `/globalpvp assignregions`", ephemeral=True)
             return
         
-        if not global_pvp_channel.permissions_for(interaction.guild.me).send_messages or not global_pvp_channel.permissions_for(interaction.guild.me).read_message_history or not global_pvp_channel.permissions_for(interaction.guild.me).send_messages_in_threads or not global_pvp_channel.permissions_for(interaction.guild.me).manage_threads:
-            await interaction.response.send_message(f"I am missing one or more of the following permissions in <#{global_pvp_channel_id}>: `Send Messages`, `Read Message History`, `Send Messages in Threads`, `Manage Threads`. I need these permissions for global pvp pings. Please contact a server admin if this isn't intentional", ephemeral=True)
+        if not global_pvp_channel.permissions_for(interaction.guild.me).send_messages or not global_pvp_channel.permissions_for(interaction.guild.me).read_message_history or not global_pvp_channel.permissions_for(interaction.guild.me).send_messages_in_threads or not global_pvp_channel.permissions_for(interaction.guild.me).manage_threads or not global_pvp_channel.permissions_for(interaction.guild.me).manage_roles:
+            await interaction.response.send_message(f"I am missing one or more of the following permissions in <#{global_pvp_channel_id}> \n\n `Send Messages`, \n `Read Message History` - read GlobalPVP announcement threads, \n `Send Messages in Threads` - publish GlobalPVP announcement threads, \n `Manage Threads` - create GlobalPVP announcement threads, \n `Manage Roles` - Allows me to ping a region role. \n\n Please contact a server admin if this isn't intentional", ephemeral=True)
             return
 
         
@@ -995,7 +1000,7 @@ class GlobalPVPCommands(app_commands.Group):
             except Exception as e:
                 logger.error(f"Error in globalpvp: {e}")
         await interaction.response.send_message(f"✅ your pvp announcement is out! Publish extra announcements in your host thread in <#{global_pvp_channel_id}>", ephemeral=True) # todo: improve this system. even if theres an error sending out the announcement it still shows this message (look below)  
-        global_pvp_ping_last_run = datetime.datetime.now(datetime.timezone.utc)
+        global_pvp_ping_last_run[int(interaction.user.id)] = datetime.datetime.now(datetime.timezone.utc)
 
             
     @ping.error
