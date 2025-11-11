@@ -730,7 +730,7 @@ class GlobalSettingsView(discord.ui.View):
         )
 
         newembed.set_footer(text="Updates every 10 seconds. If settings dont update, try using the command again")
-        newembed.add_field(name="Regions", value=regions_formatted if regions_formatted else "North America: Not set \n Europe: Not set \n Asia: Not set", inline=False)
+        newembed.add_field(name="Regions", value=f" (`/globalpvp assignregions`) \n {regions_formatted}" if regions_formatted else "(`/globalpvp assignregions`) \n North America: Not set \n Europe: Not set \n Asia: Not set", inline=False)
 
         newembed.add_field(name=f"Global PVP?", value=f"Allows your server members to ping an entire region for pvp\n{"✅ Enabled" if global_pvp_enabled else "❌ Disabled"}", inline=False)
 
@@ -740,9 +740,9 @@ class GlobalSettingsView(discord.ui.View):
             
 
         if host_roles:
-            newembed.add_field(name="Host Roles", value=f"Users with any of the following roles can host public pvp: {host_roles_formatted}", inline=False)
+            newembed.add_field(name="Host Roles", value=f" (`/globalpvp addhostrole`) \n Users with any of the following roles can host public pvp: {host_roles_formatted}", inline=False)
         else:
-            newembed.add_field(name="Host Roles", value="Anyone can host public pvp", inline=False)
+            newembed.add_field(name="Host Roles", value=" (`/globalpvp addhostrole`) \n Anyone can host public pvp", inline=False)
         
         if self.message:
             try:
@@ -857,17 +857,22 @@ class GlobalPVPCommands(app_commands.Group):
         if user_id in global_pvp_ping_last_run and datetime.datetime.now(datetime.timezone.utc) - global_pvp_ping_last_run[user_id] < datetime.timedelta(minutes=20):
             time_elapsed = datetime.datetime.now(datetime.timezone.utc) - global_pvp_ping_last_run[user_id]
             remaining_seconds = (datetime.timedelta(minutes=20) - time_elapsed).total_seconds()
-            remaining_minutes = math.ceil(remaining_seconds / 20)
+            remaining_minutes = math.ceil(remaining_seconds / 60)
             await interaction.response.send_message(f"❌ Please wait {remaining_minutes} minutes before pinging again.", ephemeral=True)
             return
         global_pvp_channel_id = await get_setting(interaction.guild.id, f"{region} Channel")
-
-        global_pvp_channel = interaction.guild.get_channel(int(global_pvp_channel_id))
 
         if not global_pvp_channel_id or not interaction.guild.get_channel(int(global_pvp_channel_id)):
             await interaction.response.send_message(f"❌ no global pvp channel set for the region [{region}]. Please tell an admin to assign a channel with `/globalpvp assignregions`", ephemeral=True)
             return
         
+        global_pvp_channel = interaction.guild.get_channel(int(global_pvp_channel_id))
+
+        regional_role_id = await get_setting(interaction.guild.id, f"{region} Role")
+
+        if not regional_role_id:
+            await interaction.response.send_message(f"❌ no regional role set for {region}. Please contact a server admin.", ephemeral=True)
+            return
         if not global_pvp_channel.permissions_for(interaction.guild.me).send_messages or not global_pvp_channel.permissions_for(interaction.guild.me).read_message_history or not global_pvp_channel.permissions_for(interaction.guild.me).send_messages_in_threads or not global_pvp_channel.permissions_for(interaction.guild.me).manage_threads or not global_pvp_channel.permissions_for(interaction.guild.me).manage_roles:
             await interaction.response.send_message(f"I am missing one or more of the following permissions in <#{global_pvp_channel_id}> \n\n `Send Messages`, \n `Read Message History` - read GlobalPVP announcement threads, \n `Send Messages in Threads` - publish GlobalPVP announcement threads, \n `Manage Threads` - create GlobalPVP announcement threads, \n `Manage Roles` - Allows me to ping a region role. \n\n Please contact a server admin if this isn't intentional", ephemeral=True)
             return
@@ -906,8 +911,8 @@ class GlobalPVPCommands(app_commands.Group):
                 if not global_pvp_channel_id or not global_pvp_enabled:
                     continue
 
-                channel = discord.utils.get(guild.text_channels, id=int(global_pvp_channel_id))
-                if not channel:
+                global_pvp_channel = discord.utils.get(guild.text_channels, id=int(global_pvp_channel_id))
+                if not global_pvp_channel:
                     continue
                 
                 # check if global pvp threads are enabled for both the host and relay guilds
@@ -931,13 +936,13 @@ class GlobalPVPCommands(app_commands.Group):
                 
                 
                 if relay_cross_server_pvp_enabled:
-                    sent_msg = await channel.send(messagecontent, allowed_mentions=allowed_mentions )                        
+                    sent_msg = await global_pvp_channel.send(messagecontent, allowed_mentions=allowed_mentions )                        
                 elif guild.id == interaction.guild.id: # relay servers includes the host server so we have to check for this. If we don't check for this, the message wont be announced at all if cross_server_pvp is disabled on the host's server.
-                    sent_msg = await channel.send(messagecontent, allowed_mentions=allowed_mentions )
+                    sent_msg = await global_pvp_channel.send(messagecontent, allowed_mentions=allowed_mentions )
                 
                 # also Auto Publish the sent message if the channel is a Discord Announcement Channel
                 if host_cross_server_pvp_enabled:
-                    if sent_msg and isinstance(channel, discord.TextChannel) and channel.is_news():
+                    if sent_msg and isinstance(global_pvp_channel, discord.TextChannel) and global_pvp_channel.is_news():
                         try: 
                             await sent_msg.publish()
                         except Exception as e:
