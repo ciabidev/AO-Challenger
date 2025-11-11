@@ -872,7 +872,8 @@ class GlobalPVPCommands(app_commands.Group):
             await interaction.response.send_message(f"I am missing one or more of the following permissions in <#{global_pvp_channel_id}> \n\n `Send Messages`, \n `Read Message History` - read GlobalPVP announcement threads, \n `Send Messages in Threads` - publish GlobalPVP announcement threads, \n `Manage Threads` - create GlobalPVP announcement threads, \n `Manage Roles` - Allows me to ping a region role. \n\n Please contact a server admin if this isn't intentional", ephemeral=True)
             return
 
-        
+        # Respond immediately so the interaction doesn't expire
+        await interaction.response.defer(ephemeral=True)
         asyncio.create_task(self._handle_global_ping(interaction, region, where, code, extra))
 
 
@@ -999,13 +1000,15 @@ class GlobalPVPCommands(app_commands.Group):
             
             except Exception as e:
                 logger.error(f"Error in globalpvp: {e}")
-        await interaction.response.send_message(f"✅ your pvp announcement is out! Publish extra announcements in your host thread in <#{global_pvp_channel_id}>", ephemeral=True) # todo: improve this system. even if theres an error sending out the announcement it still shows this message (look below)  
+        
+        # Use followup.send() instead of response.send_message() since we already deferred the response
+        await interaction.followup.send(f"✅ your pvp announcement is out! Publish extra announcements in your host thread in <#{global_pvp_channel_id}>", ephemeral=True)
         global_pvp_ping_last_run[int(interaction.user.id)] = datetime.datetime.now(datetime.timezone.utc)
 
             
     @ping.error
     async def ping_error(self, interaction: discord.Interaction, error):
-        await interaction.response.send_message(f"error: {error}", ephemeral=True)
+        await interaction.response.send_message(f"error: {error}. Please dm @wheatwhole_ for help if urgent!", ephemeral=True)
 
     @app_commands.command(name="blockuser", description="Block a user from interacting with your server")
     @app_commands.describe(
