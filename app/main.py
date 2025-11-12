@@ -936,9 +936,10 @@ class GlobalPVPCommands(app_commands.Group):
                 
                 
                 if relay_cross_server_pvp_enabled:
-                    sent_msg = await global_pvp_channel.send(messagecontent, allowed_mentions=allowed_mentions )                        
+                    sent_msg = await global_pvp_channel.send(messagecontent, allowed_mentions=discord.AllowedMentions(everyone=False, roles=True, users=True)) # make sure roles is set to true so it can ping the region role
+
                 elif guild.id == interaction.guild.id: # relay servers includes the host server so we have to check for this. If we don't check for this, the message wont be announced at all if cross_server_pvp is disabled on the host's server.
-                    sent_msg = await global_pvp_channel.send(messagecontent, allowed_mentions=allowed_mentions )
+                    sent_msg = await global_pvp_channel.send(messagecontent, allowed_mentions=discord.AllowedMentions(everyone=False, roles=True, users=True))
                 
                 # also Auto Publish the sent message if the channel is a Discord Announcement Channel
                 if host_cross_server_pvp_enabled:
