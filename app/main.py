@@ -630,7 +630,7 @@ async def get_guild_from_id(guild_id: int):
     return guild
 
 # List of supported regions for PVP matchmaking
-regions = ["North America", "Europe", "Asia"]
+regions = ["North America", "Europe", "Asia", "Brazil"]
 
 # Helper function to format region settings for display
 async def get_regions_formatted(guild_id: int) -> dict:
@@ -730,7 +730,7 @@ class GlobalSettingsView(discord.ui.View):
         )
 
         newembed.set_footer(text="Updates every 10 seconds. If settings dont update, try using the command again")
-        newembed.add_field(name="Regions", value=f" (`/globalpvp assignregions`) \n {regions_formatted}" if regions_formatted else "(`/globalpvp assignregions`) \n North America: Not set \n Europe: Not set \n Asia: Not set", inline=False)
+        newembed.add_field(name="Regions", value=f" (`/globalpvp assignregions`) \n {regions_formatted}" if regions_formatted else "(`/globalpvp assignregions`) \n North America: Not set \n Europe: Not set \n Asia: Not set \n Brazil: Not set", inline=False)
 
         newembed.add_field(name=f"Global PVP?", value=f"Allows your server members to ping an entire region for pvp\n{"✅ Enabled" if global_pvp_enabled else "❌ Disabled"}", inline=False)
 
@@ -1363,7 +1363,7 @@ class SetupView(View):
         summaryEmbed.add_field(name="Global PvP Enabled", value=global_pvp_enabled, inline=False)
         summaryEmbed.add_field(name="Cross Server PvP Enabled", value=cross_server_pvp_enabled, inline=False)
         summaryEmbed.add_field(name="Host Roles", value=host_roles_formatted if host_roles_formatted else "Anyone can host pvp", inline=False)
-        summaryEmbed.add_field(name="Assigned Regions", value=regions_formatted if regions_formatted else "North America: Not set \n Europe: Not set \n Asia: Not set", inline=False)
+        summaryEmbed.add_field(name="Assigned Regions", value=regions_formatted if regions_formatted else "North America: Not set \n Europe: Not set \n Asia: Not set \n Brazil: Not set", inline=False)
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=True)
         await interaction.edit_original_response(content="Done", embed=summaryEmbed, view=None) 
