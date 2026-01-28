@@ -758,8 +758,8 @@ async def location_autocomplete(interaction: discord.Interaction, current: str):
     Autocomplete for in game locations
     """
     locations = [
-        "South of Caitara",
         "Elysium",
+        "South of Caitara",
         "Munera Garden",
         "Mount Orthys",
         "Mount Enkav",
@@ -1605,6 +1605,7 @@ async def listbanned(
 # globalpvp command aliases
 
 @bot.tree.command(name="us-pvp", description="ping North America for pvp")
+@app_commands.autocomplete(where=location_autocomplete)
 @app_commands.describe(
     where="where are you pvping?",
     code="Roblox username or Elysium code",
@@ -1619,6 +1620,7 @@ async def uspvp(
     await handle_global_ping(interaction, "North America", where, code, extra)
 
 @bot.tree.command(name="na-pvp", description="ping North America for pvp")
+@app_commands.autocomplete(where=location_autocomplete)
 @app_commands.describe(
     where="where are you pvping?",
     code="Roblox username or Elysium code",
@@ -1633,6 +1635,7 @@ async def napvp(
     await handle_global_ping(interaction, "North America", where, code, extra)
 
 @bot.tree.command(name="eu-pvp", description="ping Europe for pvp")
+@app_commands.autocomplete(where=location_autocomplete)
 @app_commands.describe(
     where="where are you pvping?",
     code="Roblox username or Elysium code",
@@ -1647,6 +1650,7 @@ async def eupvp(
     await handle_global_ping(interaction, "Europe", where, code, extra)
 
 @bot.tree.command(name="asia-pvp", description="ping Asia for pvp")
+@app_commands.autocomplete(where=location_autocomplete)
 @app_commands.describe(
     where="where are you pvping?",
     code="Roblox username or Elysium code",
@@ -1661,6 +1665,7 @@ async def aspvp(
     await handle_global_ping(interaction, "Asia", where, code, extra)
 
 @bot.tree.command(name="br-pvp", description="ping Brazil for pvp")
+@app_commands.autocomplete(where=location_autocomplete)
 @app_commands.describe(
     where="where are you pvping?",
     code="Roblox username or Elysium code",
