@@ -584,7 +584,8 @@ async def debug_relays(ctx):
             "\n".join(relay_list)
         )
 
-async def get_setting(guild_id: int, name: str):
+async def get_setting(guild_id, name: str):
+    print(guild_id)
     """
     Retrieves a specific setting for a guild from the database.
 
@@ -779,6 +780,138 @@ async def location_autocomplete(interaction: discord.Interaction, current: str):
 # This enforces per-user cooldowns, not global cooldowns
 global_pvp_ping_last_run = {}
 
+async def handle_global_ping(interaction: discord.Interaction, region: str, where: str, code: str, extra: str = None):
+    await interaction.response.defer(ephemeral=True)
+    global global_pvp_ping_last_run
+    
+    if await ban_check(interaction):
+        return
+    host_id = int(interaction.user.id)
+    host_thread_id = None
+    relay_entries = []
+    for guild in bot.guilds:
+        try:
+            # check if Cross Server PVP is disbaled for the host guild
+            host_cross_server_pvp_enabled = await get_toggle(interaction.guild.id, "cross_server_pvp_enabled")
+            relay_cross_server_pvp_enabled = await get_toggle(guild.id, "cross_server_pvp_enabled")
+
+            if not host_cross_server_pvp_enabled and guild.id != interaction.guild_id:
+                continue
+            
+
+            # check if global pvp is enabled for this guild
+            global_pvp_enabled = await get_toggle(guild.id, "global_pvp_enabled")
+            is_blocked = await is_blocked_user(interaction.user.name, guild.id)
+            
+            if is_blocked:
+                continue
+
+            global_pvp_channel_id = await get_setting(guild.id, f"{region} Channel")
+            if not global_pvp_channel_id or not global_pvp_enabled:
+                continue
+
+            global_pvp_channel = discord.utils.get(guild.text_channels, id=int(global_pvp_channel_id))
+            if not global_pvp_channel:
+                continue
+            
+            # check if global pvp threads are enabled for both the host and relay guilds
+            host_global_pvp_threads_enabled = await get_toggle(interaction.guild.id, "global_pvp_threads_enabled")
+            relay_global_pvp_threads_enabled = await get_toggle(guild.id, "global_pvp_threads_enabled")
+
+            # Get regional role config
+            regional_role_id = await get_setting(guild.id, f"{region} Role")
+
+            regional_role_mention = f"(<@&{regional_role_id}>)" if regional_role_id else f"({region})\n-# No regional role set for {region}. Please contact a server admin if this isn't intentional"
+            extra_text = f"\nExtra info: {extra}" if extra else ""
+            guild_count = len(bot.guilds)
+            messagecontent = (
+                f"<@{interaction.user.id}> is pvping at {where}. User/code: {code} {regional_role_mention} "
+                f"{extra_text}"
+                f"\n-# TIP: Use `/globalpvp ping` to ping an entire region for pvp"
+            )
+            sent_msg = None
+            
+            # cross server check
+            
+            
+            if relay_cross_server_pvp_enabled:
+                sent_msg = await global_pvp_channel.send(messagecontent, allowed_mentions=discord.AllowedMentions(everyone=False, roles=True, users=True)) # make sure roles is set to true so it can ping the region role
+
+            elif guild.id == interaction.guild.id: # relay servers includes the host server so we have to check for this. If we don't check for this, the message wont be announced at all if cross_server_pvp is disabled on the host's server.
+                sent_msg = await global_pvp_channel.send(messagecontent, allowed_mentions=discord.AllowedMentions(everyone=False, roles=True, users=True))
+            
+            # also Auto Publish the sent message if the channel is a Discord Announcement Channel
+            if host_cross_server_pvp_enabled:
+                if sent_msg and isinstance(global_pvp_channel, discord.TextChannel) and global_pvp_channel.is_news():
+                    try: 
+                        await sent_msg.publish()
+                    except Exception as e:
+                        logger.error(f"Error publishing message: {e}")
+
+            # check if global pvp threads are enabled for this guild
+            if host_global_pvp_threads_enabled and relay_global_pvp_threads_enabled:
+                thread = await sent_msg.create_thread(
+                    name=f"{interaction.user.name}'s announcements",
+                    auto_archive_duration=60,
+                    reason="pvp thread"
+                )
+                utc_now = datetime.datetime.now(datetime.timezone.utc)
+                timestamp = int(utc_now.timestamp())
+                
+                # add the thread to thread_cache
+                thread_cache[thread.id] = thread
+                # set the message cooldown of the thread to 5 seconds
+                await thread.edit(slowmode_delay=5) 
+                
+                thread_id = int(thread.id)
+                guild_id = int(guild.id)
+
+                
+
+                member = guild.get_member(interaction.user.id)
+                if member:
+                    try:
+                        await thread.add_user(member)
+                    except discord.Forbidden:
+                        pass
+
+                if guild.id == interaction.guild_id:
+                    host_thread_id = thread_id
+                    await thread.send(
+                        f"👑 <@{interaction.user.id}> this is your HOST thread. Use this channel for announcements to your guests (and guests in other servers if Cross Server PVP is enabled). Created on <t:{timestamp}:f>. "
+                    )
+                    await db.host_threads.insert_one({
+                        "host_id": int(interaction.user.id),
+                        "host_thread_id": host_thread_id,
+                        "guild_id": guild_id,
+                    })
+                else:
+                    # Only save relay threads from other guilds
+                    await thread.send(
+                        f"📥 Through this thread you can read announcements or message the host. Created on <t:{timestamp}:f>"
+                    )
+                    relay_entries.append({
+                        "host_id": int(interaction.user.id),
+                        "guild_id": guild_id,
+                        "relay_thread_id": thread_id,
+                    })
+
+                # Insert into relay_threads now that we have the host_thread_id
+                if host_thread_id:
+                    for entry in relay_entries:
+                        entry["host_thread_id"] = host_thread_id
+                        await db.relay_threads.insert_one(entry)
+
+        
+        except Exception as e:
+            logger.error(f"Error in globalpvp: {e}")
+    
+    global_pvp_channel_id = await get_setting(interaction.guild.id, f"{region} Channel")
+    global_pvp_threads_enabled = await get_toggle(interaction.guild.id, "global_pvp_threads_enabled")
+    # Use followup.send() instead of response.send_message() since we already deferred the response
+    await interaction.followup.send(f"✅ your pvp announcement is out! {'Publish extra announcements in <#'+str(host_thread_id)+'>' if global_pvp_threads_enabled else ''}", ephemeral=True)
+    global_pvp_ping_last_run[int(interaction.user.id)] = datetime.datetime.now(datetime.timezone.utc)
+
 class GlobalPVPCommands(app_commands.Group):
     
     # show global settings command
@@ -878,143 +1011,14 @@ class GlobalPVPCommands(app_commands.Group):
             return
 
         # Respond immediately so the interaction doesn't expire
-        await interaction.response.defer(ephemeral=True)
-        asyncio.create_task(self._handle_global_ping(interaction, region, where, code, extra))
+        asyncio.create_task(handle_global_ping(interaction, region, where, code, extra))
 
 
-    async def _handle_global_ping(self, interaction: discord.Interaction, region: str, where: str, code: str, extra: str = None):
-        global global_pvp_ping_last_run
-        
-        if await ban_check(interaction):
-            return
-        host_id = int(interaction.user.id)
-        host_thread_id = None
-        relay_entries = []
-        for guild in bot.guilds:
-            try:
-                # check if Cross Server PVP is disbaled for the host guild
-                host_cross_server_pvp_enabled = await get_toggle(interaction.guild.id, "cross_server_pvp_enabled")
-                relay_cross_server_pvp_enabled = await get_toggle(guild.id, "cross_server_pvp_enabled")
-
-                if not host_cross_server_pvp_enabled and guild.id != interaction.guild_id:
-                    continue
-                
-
-                # check if global pvp is enabled for this guild
-                global_pvp_enabled = await get_toggle(guild.id, "global_pvp_enabled")
-                is_blocked = await is_blocked_user(interaction.user.name, guild.id)
-                
-                if is_blocked:
-                    continue
-
-                global_pvp_channel_id = await get_setting(guild.id, f"{region} Channel")
-                if not global_pvp_channel_id or not global_pvp_enabled:
-                    continue
-
-                global_pvp_channel = discord.utils.get(guild.text_channels, id=int(global_pvp_channel_id))
-                if not global_pvp_channel:
-                    continue
-                
-                # check if global pvp threads are enabled for both the host and relay guilds
-                host_global_pvp_threads_enabled = await get_toggle(interaction.guild.id, "global_pvp_threads_enabled")
-                relay_global_pvp_threads_enabled = await get_toggle(guild.id, "global_pvp_threads_enabled")
-
-                # Get regional role config
-                regional_role_id = await get_setting(guild.id, f"{region} Role")
-
-                regional_role_mention = f"(<@&{regional_role_id}>)" if regional_role_id else f"({region})\n-# No regional role set for {region}. Please contact a server admin if this isn't intentional"
-                extra_text = f"\nExtra info: {extra}" if extra else ""
-                guild_count = len(bot.guilds)
-                messagecontent = (
-                    f"<@{interaction.user.id}> is pvping at {where}. User/code: {code} {regional_role_mention} "
-                    f"{extra_text}"
-                    f"\n-# TIP: Use `/globalpvp ping` to ping an entire region for pvp"
-                )
-                sent_msg = None
-                
-                # cross server check
-                
-                
-                if relay_cross_server_pvp_enabled:
-                    sent_msg = await global_pvp_channel.send(messagecontent, allowed_mentions=discord.AllowedMentions(everyone=False, roles=True, users=True)) # make sure roles is set to true so it can ping the region role
-
-                elif guild.id == interaction.guild.id: # relay servers includes the host server so we have to check for this. If we don't check for this, the message wont be announced at all if cross_server_pvp is disabled on the host's server.
-                    sent_msg = await global_pvp_channel.send(messagecontent, allowed_mentions=discord.AllowedMentions(everyone=False, roles=True, users=True))
-                
-                # also Auto Publish the sent message if the channel is a Discord Announcement Channel
-                if host_cross_server_pvp_enabled:
-                    if sent_msg and isinstance(global_pvp_channel, discord.TextChannel) and global_pvp_channel.is_news():
-                        try: 
-                            await sent_msg.publish()
-                        except Exception as e:
-                            logger.error(f"Error publishing message: {e}")
-
-                # check if global pvp threads are enabled for this guild
-                if host_global_pvp_threads_enabled and relay_global_pvp_threads_enabled:
-                    thread = await sent_msg.create_thread(
-                        name=f"{interaction.user.name}'s announcements",
-                        auto_archive_duration=60,
-                        reason="pvp thread"
-                    )
-                    utc_now = datetime.datetime.now(datetime.timezone.utc)
-                    timestamp = int(utc_now.timestamp())
-                    
-                    # add the thread to thread_cache
-                    thread_cache[thread.id] = thread
-                    # set the message cooldown of the thread to 5 seconds
-                    await thread.edit(slowmode_delay=5) 
-                    
-                    thread_id = int(thread.id)
-                    guild_id = int(guild.id)
-
-                    
-
-                    member = guild.get_member(interaction.user.id)
-                    if member:
-                        try:
-                            await thread.add_user(member)
-                        except discord.Forbidden:
-                            pass
-
-                    if guild.id == interaction.guild_id:
-                        host_thread_id = thread_id
-                        await thread.send(
-                            f"👑 <@{interaction.user.id}> this is your HOST thread. Use this channel for announcements to your guests (and guests in other servers if Cross Server PVP is enabled). Created on <t:{timestamp}:f>. "
-                        )
-                        await db.host_threads.insert_one({
-                            "host_id": int(interaction.user.id),
-                            "host_thread_id": host_thread_id,
-                            "guild_id": guild_id,
-                        })
-                    else:
-                        # Only save relay threads from other guilds
-                        await thread.send(
-                            f"📥 Through this thread you can read announcements or message the host. Created on <t:{timestamp}:f>"
-                        )
-                        relay_entries.append({
-                            "host_id": int(interaction.user.id),
-                            "guild_id": guild_id,
-                            "relay_thread_id": thread_id,
-                        })
-
-                    # Insert into relay_threads now that we have the host_thread_id
-                    if host_thread_id:
-                        for entry in relay_entries:
-                            entry["host_thread_id"] = host_thread_id
-                            await db.relay_threads.insert_one(entry)
-
-            
-            except Exception as e:
-                logger.error(f"Error in globalpvp: {e}")
-        
-        # Use followup.send() instead of response.send_message() since we already deferred the response
-        await interaction.followup.send(f"✅ your pvp announcement is out! Publish extra announcements in your host thread in <#{global_pvp_channel_id}>", ephemeral=True)
-        global_pvp_ping_last_run[int(interaction.user.id)] = datetime.datetime.now(datetime.timezone.utc)
 
             
     @ping.error
     async def ping_error(self, interaction: discord.Interaction, error):
-        await interaction.response.send_message(f"error: {error}. Please dm @wheatwhole_ for help if urgent!", ephemeral=True)
+        await interaction.response.send_message(f"error: ```{error}```. Please dm @wheatwhole_ for help if urgent!", ephemeral=True)
 
     @app_commands.command(name="blockuser", description="Block a user from interacting with your server")
     @app_commands.describe(
@@ -1357,7 +1361,7 @@ class SetupView(View):
         cross_server_pvp_enabled = await get_toggle(interaction.guild.id, "cross_server_pvp_enabled")
         summaryEmbed = discord.Embed(
             title="🎉 Setup complete!",
-            description="Wanna change these later? use `/globalpvp settings` or `/setup` again. For more important commands, use `/help`. Players can use `/findpvp` to find players to 1v1, or `/globalpvp ping` to ping an entire region for pvp.",
+            description="Wanna change these later? use `/globalpvp settings` or `/setup` again. For all commands, use `/help`.",
             color=discord.Color.blue()
         )
         summaryEmbed.add_field(name="Global PvP Enabled", value=global_pvp_enabled, inline=False)
@@ -1567,8 +1571,6 @@ async def unbanuser(
     else:
         await interaction.response.send_message(f"❌ you don't have permission to unban users from using the bot. to unblock users from interacting with your server, use `/globalpvp unblockuser`", ephemeral=True)
 
-
-
 @bot.tree.command(name="listbanned", description="List all banned users")
 async def listbanned(
     interaction: discord.Interaction,
@@ -1599,7 +1601,78 @@ async def listbanned(
 
         banned_users_embed.add_field(name=user["user_id"], value=info, inline=False)
     await interaction.response.send_message(embed=banned_users_embed, ephemeral=True)
-    
+
+# globalpvp command aliases
+
+@bot.tree.command(name="us-pvp", description="ping North America for pvp")
+@app_commands.describe(
+    where="where are you pvping?",
+    code="Roblox username or Elysium code",
+    extra="Any extra information you want to add to the ping message"
+)
+async def uspvp(
+    interaction: discord.Interaction,
+    where: str,
+    code: str,
+    extra: str = None,
+): 
+    await handle_global_ping(interaction, "North America", where, code, extra)
+
+@bot.tree.command(name="na-pvp", description="ping North America for pvp")
+@app_commands.describe(
+    where="where are you pvping?",
+    code="Roblox username or Elysium code",
+    extra="Any extra information you want to add to the ping message"
+)
+async def napvp(
+    interaction: discord.Interaction,
+    where: str,
+    code: str,
+    extra: str = None,
+): 
+    await handle_global_ping(interaction, "North America", where, code, extra)
+
+@bot.tree.command(name="eu-pvp", description="ping Europe for pvp")
+@app_commands.describe(
+    where="where are you pvping?",
+    code="Roblox username or Elysium code",
+    extra="Any extra information you want to add to the ping message"
+)
+async def eupvp(
+    interaction: discord.Interaction,
+    where: str,
+    code: str,
+    extra: str = None,
+): 
+    await handle_global_ping(interaction, "Europe", where, code, extra)
+
+@bot.tree.command(name="asia-pvp", description="ping Asia for pvp")
+@app_commands.describe(
+    where="where are you pvping?",
+    code="Roblox username or Elysium code",
+    extra="Any extra information you want to add to the ping message"
+)
+async def aspvp(
+    interaction: discord.Interaction,
+    where: str,
+    code: str,
+    extra: str = None,
+): 
+    await handle_global_ping(interaction, "Asia", where, code, extra)
+
+@bot.tree.command(name="br-pvp", description="ping Brazil for pvp")
+@app_commands.describe(
+    where="where are you pvping?",
+    code="Roblox username or Elysium code",
+    extra="Any extra information you want to add to the ping message"
+)
+async def brpvp(
+    interaction: discord.Interaction,
+    where: str,
+    code: str,
+    extra: str = None,
+): 
+    await handle_global_ping(interaction, "Brazil", where, code, extra)
 
 # register globalpvp class
 bot.tree.add_command(GlobalPVPCommands(name="globalpvp", description="global/public pvp management"))
