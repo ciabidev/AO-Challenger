@@ -630,9 +630,9 @@ async def get_guild_from_id(guild_id: int):
         guild = await bot.fetch_guild(int(guild_id))  # ✅ this is awaitable
     return guild
 
-# List of supported regions for PVP matchmaking
-regions = ["North America", "Europe", "Asia", "Brazil"]
+regions = ["North America", "Europe", "Asia", "Brazil", "Africa", "Australia", "Antarctica"]
 
+region_choices = [app_commands.Choice(name=region, value=region) for region in regions]
 # Helper function to format region settings for display
 async def get_regions_formatted(guild_id: int) -> dict:
     formatted_regions = ""
@@ -655,8 +655,8 @@ async def get_host_roles_formatted(guild_id: int) -> dict:
         formatted_host_roles = formatted_host_roles[:-2] # remove last comma
 
     return formatted_host_roles
+# List of supported regions for PVP matchmaking
 
-region_choices = [app_commands.Choice(name=region, value=region) for region in regions]
 """        
 Global Settings View - Manage all global settings in one place with simple buttons
 Features:
@@ -753,26 +753,19 @@ class GlobalSettingsView(discord.ui.View):
             except Exception as e:
                 logger.error(f"Unexpected error editing settings message: {e}")
             
-async def location_autocomplete(interaction: discord.Interaction, current: str):
-    """
-    Autocomplete for in game locations
-    """
-    locations = [
-        "Elysium",
-        "South of Caitara",
-        "Munera Garden",
-        "Mount Orthys",
-        "Mount Enkav",
-        "Pelion Rift"
-    ]
+"""
+Autocomplete for in game locations
+"""
+locations = [
+    "Elysium",
+    "South of Caitara",
+    "Munera Garden",
+    "Mount Orthys",
+    "Mount Enkav",
+    "Pelion Rift"
+]
 
-    matches = [loc for loc in locations if current.lower() in loc.lower()]
-    
-    return [
-        app_commands.Choice(name=loc, value=loc)
-        for loc in matches[:25]
-    ]
-
+location_choices = [app_commands.Choice(name=loc, value=loc) for loc in locations]
 
 
 # Track the last time each user sent a global PVP ping
@@ -960,8 +953,8 @@ class GlobalPVPCommands(app_commands.Group):
 
     @app_commands.choices(
         region=region_choices,
+        where=location_choices
     )
-    @app_commands.autocomplete(where=location_autocomplete)
     async def ping(
         self,
         interaction: discord.Interaction,
@@ -1421,9 +1414,9 @@ async def upvote(interaction: discord.Interaction):
 )
 @app_commands.choices(
     region=region_choices,
+    where=location_choices
 )
 
-@app_commands.autocomplete(where=location_autocomplete)
 async def findpvp(interaction: discord.Interaction, username: str, region: str, extra: str = None, where: str = None):
     if await ban_check(interaction):
         return
@@ -1605,7 +1598,7 @@ async def listbanned(
 # globalpvp command aliases
 
 @bot.tree.command(name="us-pvp", description="ping North America for pvp")
-@app_commands.autocomplete(where=location_autocomplete)
+@app_commands.choices(where=location_choices)
 @app_commands.describe(
     where="where are you pvping?",
     code="Roblox username or Elysium code",
@@ -1620,7 +1613,7 @@ async def uspvp(
     await handle_global_ping(interaction, "North America", where, code, extra)
 
 @bot.tree.command(name="na-pvp", description="ping North America for pvp")
-@app_commands.autocomplete(where=location_autocomplete)
+@app_commands.choices(where=location_choices)
 @app_commands.describe(
     where="where are you pvping?",
     code="Roblox username or Elysium code",
@@ -1635,7 +1628,7 @@ async def napvp(
     await handle_global_ping(interaction, "North America", where, code, extra)
 
 @bot.tree.command(name="eu-pvp", description="ping Europe for pvp")
-@app_commands.autocomplete(where=location_autocomplete)
+@app_commands.choices(where=location_choices)
 @app_commands.describe(
     where="where are you pvping?",
     code="Roblox username or Elysium code",
@@ -1650,7 +1643,7 @@ async def eupvp(
     await handle_global_ping(interaction, "Europe", where, code, extra)
 
 @bot.tree.command(name="asia-pvp", description="ping Asia for pvp")
-@app_commands.autocomplete(where=location_autocomplete)
+@app_commands.choices(where=location_choices)
 @app_commands.describe(
     where="where are you pvping?",
     code="Roblox username or Elysium code",
@@ -1665,7 +1658,7 @@ async def aspvp(
     await handle_global_ping(interaction, "Asia", where, code, extra)
 
 @bot.tree.command(name="br-pvp", description="ping Brazil for pvp")
-@app_commands.autocomplete(where=location_autocomplete)
+@app_commands.choices(where=location_choices)
 @app_commands.describe(
     where="where are you pvping?",
     code="Roblox username or Elysium code",
