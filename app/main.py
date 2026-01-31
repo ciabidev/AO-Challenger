@@ -1489,7 +1489,10 @@ async def findpvp(interaction: discord.Interaction, username: str, region: str, 
 
     # using roblox api, check if the user exists
     msg = None
-
+    
+    if len(username) < 3 or len(username) > 20:
+        await interaction.response.send_message(f"❌ username must be between 3 and 20 characters", ephemeral=True)
+        return
     try:
         roblox_username = await roblox_user_exists(username)
         discord_user_already_in_queue = await db.queue.find_one({"user_id": int(interaction.user.id)})
