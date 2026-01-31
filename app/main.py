@@ -457,28 +457,30 @@ async def cooldown_timer(user_id):
 allowed_mentions = discord.AllowedMentions(everyone=False, roles=False, users=True)
 
 
-async def send_webhook_message(user, content, channel, is_host, user_guild, ctx):
+async def send_webhook_message(user, content, channel, is_host, user_guild, ctx, attachments = None):
     try:
-        # 1. Determine the source channel for the webhook
         is_thread = isinstance(channel, discord.Thread)
         webhook_channel = channel.parent if is_thread else channel
 
-        # 2. Call the method correctly with ()
         webhooks = await webhook_channel.webhooks()
         webhook = next((w for w in webhooks if w.name == "relay-webhook"), None)
 
         if not webhook:
             webhook = await webhook_channel.create_webhook(name="relay-webhook")
 
-        # 3. Setup the username logic
         username = f"({user_guild.name}) {user.display_name}"
         if is_host:
             username = f"[👑] {username}"
+        files = []
+        if attachments:
+            for attachment in attachments:
+                # Converts CDN attachment back into a File object for re-uploading
+                files.append(await attachment.to_file())
 
-        # 4. Send with the thread parameter if applicable
         await webhook.send(
             content=content,
             username=username,
+            files=files,
             avatar_url=user.display_avatar.url,
             thread=channel if is_thread else discord.utils.MISSING
         ) 
@@ -568,7 +570,7 @@ async def on_message(message: discord.Message):
                             await relay_thread.send(f"This host `{message.author.name}` is blocked from interacting with your server" 
                                                     f"\n-# Please contact a server admin if you believe this is an error.")
                             return
-                        await send_webhook_message(message.author, message.content, relay_thread, is_host=True, user_guild=message.guild, ctx=message)
+                        await send_webhook_message(message.author, message.content, relay_thread, is_host=True, user_guild=message.guild, ctx=message, attachments=message.attachments)
                         await relay_thread.edit(slowmode_delay=5)
                         await host_thread.edit(slowmode_delay=5)
 
@@ -593,7 +595,7 @@ async def on_message(message: discord.Message):
                                                    f"\n-# Please contact a server admin if you believe this is an error.")
                             return
 
-                        await send_webhook_message(message.author, message.content, host_thread, is_host=False, user_guild=message.guild, ctx=message)
+                        await send_webhook_message(message.author, message.content, host_thread, is_host=False, user_guild=message.guild, ctx=message, attachments=message.attachments)
                         await relay_thread.edit(slowmode_delay=5)
                         await host_thread.edit(slowmode_delay=5)
 
