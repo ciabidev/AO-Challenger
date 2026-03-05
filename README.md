@@ -1,6 +1,7 @@
 # What is AO Challenger?
 
 AO Challenger is an Arcane Odyssey Discord bot that allows you to **ping globally for PvP or find a 1v1**. [ALL of the code is fully free and open source](https://github.com/ciabidev/AO-Challenger).
+## Add AO Challenger to your servre: https://discord.com/oauth2/authorize?client_id=1393757819475464313
 
 ## How to Use
 
