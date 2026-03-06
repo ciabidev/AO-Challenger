@@ -825,6 +825,47 @@ async def handle_global_ping(interaction: discord.Interaction, region: str, wher
     
     if await ban_check(interaction):
         return
+    
+    # Validate guild context
+    if not interaction.guild.id:
+        await interaction.followup.send(f"❌ this command is not available in DMs", ephemeral=True)
+        return
+    
+    # Check host roles
+    host_roles = await get_setting(interaction.guild.id, "host_roles")
+    host_roles_formatted = await get_host_roles_formatted(interaction.guild.id)
+    if host_roles and not any(role.id in host_roles for role in interaction.user.roles):
+        await interaction.followup.send(f"❌ you need one of the following to ping for pvp: {host_roles_formatted}", ephemeral=True)
+        return
+    
+    # Check cooldown
+    user_id = interaction.user.id
+    if user_id in global_pvp_ping_last_run and datetime.datetime.now(datetime.timezone.utc) - global_pvp_ping_last_run[user_id] < datetime.timedelta(minutes=10):
+        time_elapsed = datetime.datetime.now(datetime.timezone.utc) - global_pvp_ping_last_run[user_id]
+        remaining_seconds = (datetime.timedelta(minutes=10) - time_elapsed).total_seconds()
+        remaining_minutes = math.ceil(remaining_seconds / 60)
+        await interaction.followup.send(f"❌ Please wait {remaining_minutes} minutes before pinging again.", ephemeral=True)
+        return
+    
+    # Check if global PVP channel is set for the region
+    global_pvp_channel_id = await get_setting(interaction.guild.id, f"{region} Channel")
+    if not global_pvp_channel_id or not interaction.guild.get_channel(int(global_pvp_channel_id)):
+        await interaction.followup.send(f"❌ no global pvp channel set for the region [{region}]. Please tell an admin to assign a channel with `/globalpvp assignregions`", ephemeral=True)
+        return
+    
+    global_pvp_channel = interaction.guild.get_channel(int(global_pvp_channel_id))
+    
+    # Check if regional role is set
+    regional_role_id = await get_setting(interaction.guild.id, f"{region} Role")
+    if not regional_role_id:
+        await interaction.followup.send(f"❌ no regional role set for {region}. Please contact a server admin.", ephemeral=True)
+        return
+    
+    # Check bot permissions in the channel
+    if not global_pvp_channel.permissions_for(interaction.guild.me).send_messages or not global_pvp_channel.permissions_for(interaction.guild.me).read_message_history or not global_pvp_channel.permissions_for(interaction.guild.me).send_messages_in_threads or not global_pvp_channel.permissions_for(interaction.guild.me).manage_threads or not global_pvp_channel.permissions_for(interaction.guild.me).manage_roles:
+        await interaction.followup.send(f"I am missing one or more of the following permissions in <#{global_pvp_channel_id}> \n\n `Send Messages`, \n `Read Message History` - read GlobalPVP announcement threads, \n `Send Messages in Threads` - publish GlobalPVP announcement threads, \n `Manage Threads` - create GlobalPVP announcement threads, \n `Manage Roles` - Allows me to ping a region role. \n\n Please contact a server admin if this isn't intentional", ephemeral=True)
+        return
+    
     host_id = int(interaction.user.id)
     host_thread_id = None
     host_sent_msg = None
@@ -1003,7 +1044,7 @@ class GlobalPVPCommands(app_commands.Group):
     Allows users to ping an entire region for pvp/elysium
     """
 
-    @app_commands.command(name="ping", description="ping an entire region for pvp/elysium")
+    @app_commands.command(name="ping", description="ping an entire region for pvp/elysium [THIS WILL PING OTHER SERVERS]")
     
     @app_commands.describe(
         region="the region to ping for pvp",
@@ -1024,46 +1065,6 @@ class GlobalPVPCommands(app_commands.Group):
         code: str,
         extra: str = None,
     ):
-        if await ban_check(interaction):
-            return
-        
-        if not interaction.guild.id:
-            await interaction.response.send_message(f"❌ this command is not available in DMs", ephemeral=True)
-            return
-
-        host_roles = await get_setting(interaction.guild.id, "host_roles")
-        host_roles_formatted = await get_host_roles_formatted(interaction.guild.id)
-
-        # check if the user has any of the host roles
-        if host_roles and not any(role.id in host_roles for role in interaction.user.roles):
-            await interaction.response.send_message(f"❌ you need one of the following to ping for pvp: {host_roles_formatted}", ephemeral=True)
-            return 
-        
-        # check if the user has a global pvp channel set for the region and check permissions
-        user_id = interaction.user.id
-        if user_id in global_pvp_ping_last_run and datetime.datetime.now(datetime.timezone.utc) - global_pvp_ping_last_run[user_id] < datetime.timedelta(minutes=20):
-            time_elapsed = datetime.datetime.now(datetime.timezone.utc) - global_pvp_ping_last_run[user_id]
-            remaining_seconds = (datetime.timedelta(minutes=20) - time_elapsed).total_seconds()
-            remaining_minutes = math.ceil(remaining_seconds / 60)
-            await interaction.response.send_message(f"❌ Please wait {remaining_minutes} minutes before pinging again.", ephemeral=True)
-            return
-        global_pvp_channel_id = await get_setting(interaction.guild.id, f"{region} Channel")
-
-        if not global_pvp_channel_id or not interaction.guild.get_channel(int(global_pvp_channel_id)):
-            await interaction.response.send_message(f"❌ no global pvp channel set for the region [{region}]. Please tell an admin to assign a channel with `/globalpvp assignregions`", ephemeral=True)
-            return
-        
-        global_pvp_channel = interaction.guild.get_channel(int(global_pvp_channel_id))
-
-        regional_role_id = await get_setting(interaction.guild.id, f"{region} Role")
-
-        if not regional_role_id:
-            await interaction.response.send_message(f"❌ no regional role set for {region}. Please contact a server admin.", ephemeral=True)
-            return
-        if not global_pvp_channel.permissions_for(interaction.guild.me).send_messages or not global_pvp_channel.permissions_for(interaction.guild.me).read_message_history or not global_pvp_channel.permissions_for(interaction.guild.me).send_messages_in_threads or not global_pvp_channel.permissions_for(interaction.guild.me).manage_threads or not global_pvp_channel.permissions_for(interaction.guild.me).manage_roles:
-            await interaction.response.send_message(f"I am missing one or more of the following permissions in <#{global_pvp_channel_id}> \n\n `Send Messages`, \n `Read Message History` - read GlobalPVP announcement threads, \n `Send Messages in Threads` - publish GlobalPVP announcement threads, \n `Manage Threads` - create GlobalPVP announcement threads, \n `Manage Roles` - Allows me to ping a region role. \n\n Please contact a server admin if this isn't intentional", ephemeral=True)
-            return
-
         # Respond immediately so the interaction doesn't expire
         asyncio.create_task(handle_global_ping(interaction, region, where, code, extra))
 
@@ -1661,7 +1662,7 @@ async def listbanned(
 
 # globalpvp command aliases
 
-@bot.tree.command(name="us-pvp", description="ping North America for pvp")
+@bot.tree.command(name="us-pvp", description="ping North America for pvp [THIS WILL PING OTHER SERVERS]")
 @app_commands.choices(where=location_choices)
 @app_commands.describe(
     where="where are you pvping?",
@@ -1676,7 +1677,7 @@ async def uspvp(
 ): 
     await handle_global_ping(interaction, "North America", where, code, extra)
 
-@bot.tree.command(name="na-pvp", description="ping North America for pvp")
+@bot.tree.command(name="na-pvp", description="ping North America for pvp [THIS WILL PING OTHER SERVERS]")
 @app_commands.choices(where=location_choices)
 @app_commands.describe(
     where="where are you pvping?",
@@ -1691,7 +1692,7 @@ async def napvp(
 ): 
     await handle_global_ping(interaction, "North America", where, code, extra)
 
-@bot.tree.command(name="eu-pvp", description="ping Europe for pvp")
+@bot.tree.command(name="eu-pvp", description="ping Europe for pvp [THIS WILL PING OTHER SERVERS]")
 @app_commands.choices(where=location_choices)
 @app_commands.describe(
     where="where are you pvping?",
@@ -1706,7 +1707,7 @@ async def eupvp(
 ): 
     await handle_global_ping(interaction, "Europe", where, code, extra)
 
-@bot.tree.command(name="asia-pvp", description="ping Asia for pvp")
+@bot.tree.command(name="asia-pvp", description="ping Asia for pvp [THIS WILL PING OTHER SERVERS]")
 @app_commands.choices(where=location_choices)
 @app_commands.describe(
     where="where are you pvping?",
@@ -1721,7 +1722,7 @@ async def aspvp(
 ): 
     await handle_global_ping(interaction, "Asia", where, code, extra)
 
-@bot.tree.command(name="br-pvp", description="ping Brazil for pvp")
+@bot.tree.command(name="br-pvp", description="ping Brazil for pvp [THIS WILL PING OTHER SERVERS]")
 @app_commands.choices(where=location_choices)
 @app_commands.describe(
     where="where are you pvping?",
