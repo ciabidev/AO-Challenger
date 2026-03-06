@@ -973,8 +973,9 @@ async def handle_global_ping(interaction: discord.Interaction, region: str, wher
             if relay_receive_pings_enabled and guild.id != interaction.guild.id:
                 server_count += 1
 
+            
             messagecontent = (
-                f"{"👑" if guild.id == interaction.guild.id else "📥"} <@{interaction.user.id}> is pvping at {where}. User/code: {code} {regional_role_mention} "
+                f"{"👑" if guild.id == interaction.guild.id else "📥"} <@{interaction.user.id}> is pvping at {where} {"😹😹😹" if interaction.user.id == 881885624678907934 else ""}. User/code: {code} {regional_role_mention} "
                 f"{extra_text}\n-# Use `/{region_shorthand_mapping[region]}-pvp` to ping this region (this pings other servers too)"
             )
 
