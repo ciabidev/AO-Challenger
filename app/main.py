@@ -1041,9 +1041,9 @@ class GlobalPVPCommands(app_commands.Group):
         
         # check if the user has a global pvp channel set for the region and check permissions
         user_id = interaction.user.id
-        if user_id in global_pvp_ping_last_run and datetime.datetime.now(datetime.timezone.utc) - global_pvp_ping_last_run[user_id] < datetime.timedelta(minutes=10):
+        if user_id in global_pvp_ping_last_run and datetime.datetime.now(datetime.timezone.utc) - global_pvp_ping_last_run[user_id] < datetime.timedelta(minutes=20):
             time_elapsed = datetime.datetime.now(datetime.timezone.utc) - global_pvp_ping_last_run[user_id]
-            remaining_seconds = (datetime.timedelta(minutes=10) - time_elapsed).total_seconds()
+            remaining_seconds = (datetime.timedelta(minutes=20) - time_elapsed).total_seconds()
             remaining_minutes = math.ceil(remaining_seconds / 60)
             await interaction.response.send_message(f"❌ Please wait {remaining_minutes} minutes before pinging again.", ephemeral=True)
             return
@@ -1586,8 +1586,8 @@ async def findpvp(interaction: discord.Interaction, username: str, region: str, 
         
         await asyncio.sleep(1)
         if searchingPlayer != None:
-            if datetime.datetime.now(datetime.timezone.utc) - datetime.datetime.fromisoformat(searchingPlayer["created_at"]) > datetime.timedelta(minutes=5):
-                result = await interaction.followup.send(f"<@{interaction.user.id}> ❌ No player found in 5 minutes. Cancelling queue.", ephemeral=True)
+            if datetime.datetime.now(datetime.timezone.utc) - datetime.datetime.fromisoformat(searchingPlayer["created_at"]) > datetime.timedelta(minutes=60):
+                result = await interaction.followup.send(f"<@{interaction.user.id}> ❌ No player found in 1 hour. Cancelling queue.", ephemeral=True)
                 await msg.delete()
                 await db.queue.delete_one({"username": searchingPlayer["username"]})
                 break
