@@ -774,39 +774,43 @@ class GlobalSettingsView(discord.ui.View):
     async def auto_reload(self):
         while True:
             await asyncio.sleep(10)
-            await self.update_embed()
-            # stop if command timed out
-            if self.message is None:
+            try:
+                await self.update_embed()
+            except Exception as e:
                 break
 
-    @discord.ui.button(label="Toggle Global PVP", style=discord.ButtonStyle.primary, row=2)  # toggle global pvp
+    @discord.ui.button(label="Toggle Global PVP", style=discord.ButtonStyle.primary, row=1)  # toggle global pvp
     async def toggle_global_pvp_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         global_pvp_enabled = await get_toggle(self.guild_id, "global_pvp_enabled")
         await set_setting(self.guild_id, "global_pvp_enabled", not global_pvp_enabled)
         await interaction.response.defer(ephemeral=True)  # prevents double send
         await self.update_embed()
     
-    @discord.ui.button(label="Toggle Send Pings to Other Servers", style=discord.ButtonStyle.primary, row=3)
+    @discord.ui.button(label="Toggle Send Pings to Other Servers", style=discord.ButtonStyle.primary, row=2)
     async def toggle_send_pings_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         send_pings_enabled = await get_toggle(self.guild_id, "send_pings_to_other_servers")
         await set_setting(self.guild_id, "send_pings_to_other_servers", not send_pings_enabled)
         await interaction.response.defer(ephemeral=True)
         await self.update_embed()
     
-    @discord.ui.button(label="Toggle Receive Pings from Other Servers", style=discord.ButtonStyle.primary, row=3)
+    @discord.ui.button(label="Toggle Receive Pings from Other Servers", style=discord.ButtonStyle.primary, row=2)
     async def toggle_receive_pings_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         receive_pings_enabled = await get_toggle(self.guild_id, "receive_pings_from_other_servers")
         await set_setting(self.guild_id, "receive_pings_from_other_servers", not receive_pings_enabled)
         await interaction.response.defer(ephemeral=True)
         await self.update_embed()
 
-    @discord.ui.button(label="Toggle Global PVP Threads", style=discord.ButtonStyle.primary, row=4)  # toggle global pvp threads
+    @discord.ui.button(label="Toggle Global PVP Threads", style=discord.ButtonStyle.primary, row=1)
     async def toggle_global_pvp_threads_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         global_pvp_threads_enabled = await get_toggle(self.guild_id, "global_pvp_threads_enabled")
         await set_setting(self.guild_id, "global_pvp_threads_enabled", not global_pvp_threads_enabled)
         await interaction.response.defer(ephemeral=True)  # prevents double send
         await self.update_embed()
 
+    @discord.ui.button(label="Refresh", style=discord.ButtonStyle.primary, row=3)
+    async def refresh_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        await self.update_embed()
     async def update_embed(self):
         guild = await get_guild_from_id(self.guild_id)
             
