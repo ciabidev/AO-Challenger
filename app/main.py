@@ -97,6 +97,46 @@ if dev_mode:
 
 bot = commands.Bot(command_prefix='?', intents=intents)
 import discord
+
+async def migrate_cross_server_pvp_settings():
+    """
+    Migrates old cross_server_pvp_enabled setting to new send/receive toggles.
+    Runs once on bot startup to ensure no server loses its configuration.
+    """
+    try:
+        # Find all guilds with the old cross_server_pvp_enabled setting
+        old_settings = await db.server_config.find({"name": "cross_server_pvp_enabled"}).to_list(None)
+        
+        migrated_count = 0
+        for setting in old_settings:
+            guild_id = setting["guild_id"]
+            old_enabled = setting.get("value", False)
+            
+            # Check if new settings already exist (skip if they do)
+            send_exists = await db.server_config.find_one({"guild_id": guild_id, "name": "send_pings_to_other_servers"})
+            receive_exists = await db.server_config.find_one({"guild_id": guild_id, "name": "receive_pings_from_other_servers"})
+            
+            if not send_exists:
+                await db.server_config.insert_one({
+                    "guild_id": guild_id,
+                    "name": "send_pings_to_other_servers",
+                    "value": old_enabled
+                })
+            
+            if not receive_exists:
+                await db.server_config.insert_one({
+                    "guild_id": guild_id,
+                    "name": "receive_pings_from_other_servers",
+                    "value": old_enabled
+                })
+            
+            migrated_count += 1
+        
+        if migrated_count > 0:
+            logging.info(f"✅ Migrated cross-server PVP settings for {migrated_count} guild(s)")
+    except Exception as e:
+        logging.error(f"❌ Migration error: {e}")
+
 @bot.event
 async def on_ready():
     """
@@ -129,6 +169,9 @@ async def on_ready():
 
     # remove all queue entries on start
     await db.queue.delete_many({})
+    
+    # Run migration for cross-server PVP settings
+    await migrate_cross_server_pvp_settings()
 
 """
 
@@ -743,11 +786,18 @@ class GlobalSettingsView(discord.ui.View):
         await interaction.response.defer(ephemeral=True)  # prevents double send
         await self.update_embed()
     
-    @discord.ui.button(label="Toggle Cross Server PVP", style=discord.ButtonStyle.primary, row=3)  # toggle cross server pvp
-    async def toggle_cross_server_pvp_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        cross_server_pvp_enabled = await get_toggle(self.guild_id, "cross_server_pvp_enabled")
-        await set_setting(self.guild_id, "cross_server_pvp_enabled", not cross_server_pvp_enabled)
-        await interaction.response.defer(ephemeral=True)  # prevents double send
+    @discord.ui.button(label="Toggle Send Pings to Other Servers", style=discord.ButtonStyle.primary, row=3)
+    async def toggle_send_pings_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        send_pings_enabled = await get_toggle(self.guild_id, "send_pings_to_other_servers")
+        await set_setting(self.guild_id, "send_pings_to_other_servers", not send_pings_enabled)
+        await interaction.response.defer(ephemeral=True)
+        await self.update_embed()
+    
+    @discord.ui.button(label="Toggle Receive Pings from Other Servers", style=discord.ButtonStyle.primary, row=3)
+    async def toggle_receive_pings_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        receive_pings_enabled = await get_toggle(self.guild_id, "receive_pings_from_other_servers")
+        await set_setting(self.guild_id, "receive_pings_from_other_servers", not receive_pings_enabled)
+        await interaction.response.defer(ephemeral=True)
         await self.update_embed()
 
     @discord.ui.button(label="Toggle Global PVP Threads", style=discord.ButtonStyle.primary, row=4)  # toggle global pvp threads
@@ -760,7 +810,8 @@ class GlobalSettingsView(discord.ui.View):
     async def update_embed(self):
         guild = await get_guild_from_id(self.guild_id)
             
-        cross_server_pvp_enabled = await get_toggle(self.guild_id, "cross_server_pvp_enabled") 
+        send_pings_enabled = await get_toggle(self.guild_id, "send_pings_to_other_servers")
+        receive_pings_enabled = await get_toggle(self.guild_id, "receive_pings_from_other_servers")
         global_pvp_enabled = await get_toggle(self.guild_id, "global_pvp_enabled")
         global_pvp_threads_enabled = await get_toggle(self.guild_id, "global_pvp_threads_enabled")
 
@@ -776,12 +827,13 @@ class GlobalSettingsView(discord.ui.View):
             color=discord.Color.blue()
         )
 
-        newembed.set_footer(text="Updates every 10 seconds. If settings dont update, try using the command again")
         newembed.add_field(name="Regions", value=f" (`/globalpvp assignregions`) \n {regions_formatted}" if regions_formatted else "(`/globalpvp assignregions`) \n North America: Not set \n Europe: Not set \n Asia: Not set \n Brazil: Not set", inline=False)
 
         newembed.add_field(name=f"Global PVP?", value=f"Allows your server members to ping an entire region for pvp\n{"✅ Enabled" if global_pvp_enabled else "❌ Disabled"}", inline=False)
 
-        newembed.add_field(name=f"Cross Server PVP?", value=f"Allows your server members to send and recieve pvp pings from other servers. Same with messages in Global PVP Threads\n{"✅ Enabled" if cross_server_pvp_enabled else "❌ Disabled"}", inline=False)
+        newembed.add_field(name=f"Send Pings to Other Servers?", value=f"Allows pings from your server members to be sent to other servers\n{"✅ Enabled" if send_pings_enabled else "❌ Disabled"}", inline=False)
+
+        newembed.add_field(name=f"Receive Pings from Other Servers?", value=f"Allows your server to receive pvp pings from other servers\n{"✅ Enabled" if receive_pings_enabled else "❌ Disabled"}", inline=False)
         
         newembed.add_field(name=f"Global PVP Threads?", value=f"Adds a thread below each pvp ping for host announcements\n{"✅ Enabled" if global_pvp_threads_enabled else "❌ Disabled"}", inline=False)
             
@@ -818,7 +870,15 @@ location_choices = [app_commands.Choice(name=loc, value=loc) for loc in location
 # Format: {user_id (int): datetime.datetime}
 # This enforces per-user cooldowns, not global cooldowns
 global_pvp_ping_last_run = {}
-
+region_shorthand_mapping = {
+    "North America": "na",
+    "Europe": "eu",
+    "Asia": "asia",
+    "Brazil": "br",
+    "Australia": "au",
+    "Antarctica": "an",
+    "Africa": "af",
+}
 async def handle_global_ping(interaction: discord.Interaction, region: str, where: str, code: str, extra: str = None):
     await interaction.response.defer(ephemeral=True)
     global global_pvp_ping_last_run
@@ -863,7 +923,7 @@ async def handle_global_ping(interaction: discord.Interaction, region: str, wher
     
     # Check bot permissions in the channel
     if not global_pvp_channel.permissions_for(interaction.guild.me).send_messages or not global_pvp_channel.permissions_for(interaction.guild.me).read_message_history or not global_pvp_channel.permissions_for(interaction.guild.me).send_messages_in_threads or not global_pvp_channel.permissions_for(interaction.guild.me).manage_threads or not global_pvp_channel.permissions_for(interaction.guild.me).manage_roles:
-        await interaction.followup.send(f"I am missing one or more of the following permissions in <#{global_pvp_channel_id}> \n\n `Send Messages`, \n `Read Message History` - read GlobalPVP announcement threads, \n `Send Messages in Threads` - publish GlobalPVP announcement threads, \n `Manage Threads` - create GlobalPVP announcement threads, \n `Manage Roles` - Allows me to ping a region role. \n\n Please contact a server admin if this isn't intentional", ephemeral=True)
+        await interaction.followup.send(f"I am missing one or more of the following permissions in <#{global_pvp_channel_id}> \n\n`Send Messages`, \n `Read Message History` - read GlobalPVP announcement threads, \n `Send Messages in Threads` - publish GlobalPVP announcement threads, \n `Manage Threads` and `Create Threads` - create and manage GlobalPVP announcement threads, \n `Manage Roles` and `Mention all roles` - Allows me to ping the set role when global pvp is used. \n `Manage Webhooks` - GlobalPVP threads use webhooks for cross-server communication. \n\n Please contact a server admin if this isn't intentional", ephemeral=True)
         return
     
     host_id = int(interaction.user.id)
@@ -877,11 +937,11 @@ async def handle_global_ping(interaction: discord.Interaction, region: str, wher
         return  
     for guild in bot.guilds:
         try:
-            # check if Cross Server PVP is disbaled for the host guild
-            host_cross_server_pvp_enabled = await get_toggle(interaction.guild.id, "cross_server_pvp_enabled")
-            relay_cross_server_pvp_enabled = await get_toggle(guild.id, "cross_server_pvp_enabled")
+            # check if sending to other servers is enabled for the host guild
+            host_send_pings_enabled = await get_toggle(interaction.guild.id, "send_pings_to_other_servers")
+            relay_receive_pings_enabled = await get_toggle(guild.id, "receive_pings_from_other_servers")
 
-            if not host_cross_server_pvp_enabled and guild.id != interaction.guild_id:
+            if not host_send_pings_enabled and guild.id != interaction.guild_id:
                 continue
             
 
@@ -910,30 +970,28 @@ async def handle_global_ping(interaction: discord.Interaction, region: str, wher
             regional_role_mention = f"(<@&{regional_role_id}>)" if regional_role_id else f"({region})\n-# No regional role set for {region}. Please contact a server admin if this isn't intentional"
             extra_text = f"\nExtra info: {extra}" if extra else ""
            
-            if relay_cross_server_pvp_enabled:
+            if relay_receive_pings_enabled and guild.id != interaction.guild.id:
                 server_count += 1
 
             messagecontent = (
-                f"<@{interaction.user.id}> is pvping at {where}. User/code: {code} {regional_role_mention} "
-                f"{extra_text}"
+                f"{"👑" if guild.id == interaction.guild.id else "📥"} <@{interaction.user.id}> is pvping at {where}. User/code: {code} {regional_role_mention} "
+                f"{extra_text}\n-# Use `/{region_shorthand_mapping[region]}-pvp` to ping this region (this pings other servers too)"
             )
 
             sent_msg = None
             
-            # cross server check
-            
-            
-            if relay_cross_server_pvp_enabled or str(guild.id) == str(interaction.guild.id):
+            # Check if we should send to this guild
+            if relay_receive_pings_enabled or str(guild.id) == str(interaction.guild.id):
                 sent_msg = await global_pvp_channel.send(messagecontent, allowed_mentions=discord.AllowedMentions(everyone=False, roles=True, users=True)) # make sure roles is set to true so it can ping the region role
                 if guild.id == interaction.guild.id:
                     host_sent_msg = sent_msg
-            elif guild.id == interaction.guild.id: # relay servers includes the host server so we have to check for this. If we don't check for this, the message wont be announced at all if cross_server_pvp is disabled on the host's server.
+            elif guild.id == interaction.guild.id: # host server includes the host server so we have to check for this. If we don't check for this, the message wont be announced at all if receive pings is disabled on the relay's server.
                 sent_msg = await global_pvp_channel.send(messagecontent, allowed_mentions=discord.AllowedMentions(everyone=False, roles=True, users=True))
 
  
             
             # also Auto Publish the sent message if the channel is a Discord Announcement Channel
-            if host_cross_server_pvp_enabled:
+            if host_send_pings_enabled:
                 if sent_msg and isinstance(global_pvp_channel, discord.TextChannel) and global_pvp_channel.is_news():
                     try: 
                         await sent_msg.publish()
@@ -970,7 +1028,7 @@ async def handle_global_ping(interaction: discord.Interaction, region: str, wher
                 if guild.id == interaction.guild_id:
                     host_thread_id = thread_id
                     await thread.send(
-                        f"👑 <@{interaction.user.id}> this is your HOST thread. Use this channel for announcements to your guests (and guests in other servers if Cross Server PVP is enabled). Created on <t:{timestamp}:f>. "
+                        f"👑 <@{interaction.user.id}> this is your HOST thread. Use this channel for announcements to your guests here and in other servers. Created on <t:{timestamp}:f>. "
                     )
                     await db.host_threads.insert_one({
                         "host_id": int(interaction.user.id),
@@ -1002,9 +1060,10 @@ async def handle_global_ping(interaction: discord.Interaction, region: str, wher
     global_pvp_channel_id = await get_setting(interaction.guild.id, f"{region} Channel")
     global_pvp_threads_enabled = await get_toggle(interaction.guild.id, "global_pvp_threads_enabled")
     # Use followup.send() instead of response.send_message() since we already deferred the response
-    if host_sent_msg:
-        await host_sent_msg.edit(content=f"{host_sent_msg.content}\n-# 🔁 This ping was relayed to {server_count} server(s)")
-    await interaction.followup.send(f"✅ your pvp announcement is out! ", ephemeral=True)
+
+
+    success_message = await interaction.followup.send(f"✅ your pvp announcement is out! ", ephemeral=True)
+    await success_message.edit(content=f"{success_message.content}\n-# 🔁 This ping was relayed to {server_count} server(s)")
     global_pvp_ping_last_run[int(interaction.user.id)] = datetime.datetime.now(datetime.timezone.utc)
 
 class GlobalPVPCommands(app_commands.Group):
@@ -1368,44 +1427,22 @@ class SetupView(View):
 
 
     async def step_enable_cross_server_pvp(self, interaction: Interaction):
+        self.latest_interaction = interaction
 
-        async def toggle_callback(enable: bool):
-            await set_setting(interaction.guild.id, "cross_server_pvp_enabled", enable)
+        async def on_done(i: Interaction):
+            self.latest_interaction = i
+            await self.next_step(i)
 
-            # Confirm it's saved
-            current = await get_setting(interaction.guild.id, "cross_server_pvp_enabled")   
-
-
-            await interaction.edit_original_response(
-                content=f"✔️ Cross Server PvP {'enabled' if enable else 'disabled'}.",
-                view=None
-            )
-            await asyncio.sleep(3)
-            await self.next_step(interaction)
-
-        async def handle_button(i: Interaction):
-            await i.response.defer(ephemeral=True)
-            if i.data["custom_id"] == "enable_cross_server":
-                await toggle_callback(True)
-            elif i.data["custom_id"] == "disable_cross_server":
-                await toggle_callback(False)
-
-        # Define buttons and attach callback BEFORE adding to view
-        enable_button = Button(label="Enable", style=ButtonStyle.success, custom_id="enable_cross_server")
-        disable_button = Button(label="Disable", style=ButtonStyle.danger, custom_id="disable_cross_server")
-
-        enable_button.callback = handle_button
-        disable_button.callback = handle_button
-
+        done = Button(label="Done/Skip", style=ButtonStyle.success, row=1)
+        done.callback = on_done
         self.clear_items()
-        self.add_item(enable_button)
-        self.add_item(disable_button)
+        self.add_item(done)
 
-        await interaction.response.send_message(
-            content="Step 4: Do you want to enable Cross Server PvP? \n This will enable your server to receive pvp pings from *other servers* and vice versa",
-            view=self,
-            ephemeral=True
-        )
+        # 🛠 FIX: Defer the response so followup works
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
+
+        await interaction.edit_original_response(content="Step 4: Configure cross-server settings via `/globalpvp settings`: \n- Send Pings to Other Servers: Allows your pings to go to other servers\n- Receive Pings from Other Servers: Allows your server to receive pings from other servers", view=self)
 
     
     async def finish(self, interaction: Interaction):
@@ -1413,14 +1450,16 @@ class SetupView(View):
         regions_formatted = await get_regions_formatted(interaction.guild.id)
         host_roles_formatted = await get_host_roles_formatted(interaction.guild.id)
         global_pvp_enabled = await get_toggle(interaction.guild.id, "global_pvp_enabled")
-        cross_server_pvp_enabled = await get_toggle(interaction.guild.id, "cross_server_pvp_enabled")
+        send_pings_enabled = await get_toggle(interaction.guild.id, "send_pings_to_other_servers")
+        receive_pings_enabled = await get_toggle(interaction.guild.id, "receive_pings_from_other_servers")
         summaryEmbed = discord.Embed(
             title="🎉 Setup complete!",
-            description="Wanna change these later? use `/globalpvp settings` or `/setup` again. For all commands, use `/help`.",
+            description="Wanna change these later? use `/globalpvp settings` or `/setup` again. For all commands, use `/help`.\nIf you have any issues, please message @wheatwhole_ on discord.",
             color=discord.Color.blue()
         )
         summaryEmbed.add_field(name="Global PvP Enabled", value=global_pvp_enabled, inline=False)
-        summaryEmbed.add_field(name="Cross Server PvP Enabled", value=cross_server_pvp_enabled, inline=False)
+        summaryEmbed.add_field(name="Send Pings to Other Servers", value=send_pings_enabled, inline=False)
+        summaryEmbed.add_field(name="Receive Pings from Other Servers", value=receive_pings_enabled, inline=False)
         summaryEmbed.add_field(name="Host Roles", value=host_roles_formatted if host_roles_formatted else "Anyone can host pvp", inline=False)
         summaryEmbed.add_field(name="Assigned Regions", value=regions_formatted if regions_formatted else "North America: Not set \n Europe: Not set \n Asia: Not set \n Brazil: Not set", inline=False)
         if not interaction.response.is_done():
@@ -1737,6 +1776,50 @@ async def brpvp(
 ): 
     await handle_global_ping(interaction, "Brazil", where, code, extra)
 
+@bot.tree.command(name="au-pvp", description="ping Australia for pvp [THIS WILL PING OTHER SERVERS]")
+@app_commands.choices(where=location_choices)
+@app_commands.describe(
+    where="where are you pvping?",
+    code="Roblox username or Elysium code",
+    extra="Any extra information you want to add to the ping message"
+)
+async def aupvp(
+    interaction: discord.Interaction,
+    where: str,
+    code: str,
+    extra: str = None,
+): 
+    await handle_global_ping(interaction, "Australia", where, code, extra)
+
+@bot.tree.command(name="an-pvp", description="ping Antarctica for pvp [THIS WILL PING OTHER SERVERS]")
+@app_commands.choices(where=location_choices)
+@app_commands.describe(
+    where="where are you pvping?",
+    code="Roblox username or Elysium code",
+    extra="Any extra information you want to add to the ping message"
+)
+async def anpvp(
+    interaction: discord.Interaction,
+    where: str,
+    code: str,
+    extra: str = None,
+): 
+    await handle_global_ping(interaction, "Antarctica", where, code, extra)
+
+@bot.tree.command(name="af-pvp", description="ping Africa for pvp [THIS WILL PING OTHER SERVERS]")
+@app_commands.choices(where=location_choices)
+@app_commands.describe(
+    where="where are you pvping?",
+    code="Roblox username or Elysium code",
+    extra="Any extra information you want to add to the ping message"
+)
+async def afpvp(
+    interaction: discord.Interaction,
+    where: str,
+    code: str,
+    extra: str = None,
+): 
+    await handle_global_ping(interaction, "Africa", where, code, extra)
 # register globalpvp class
 bot.tree.add_command(GlobalPVPCommands(name="globalpvp", description="global/public pvp management"))
 def run_bot():
