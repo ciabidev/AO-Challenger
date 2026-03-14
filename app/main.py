@@ -1033,7 +1033,7 @@ async def handle_global_ping(interaction: discord.Interaction, region: str, wher
                 if guild.id == interaction.guild_id:
                     host_thread_id = thread_id
                     await thread.send(
-                        f"👑 <@{interaction.user.id}> this is your HOST thread. Use this channel for announcements to your guests here and in other servers. Created on <t:{timestamp}:f>. "
+                        f"<@{interaction.user.id}> Use this thread for announcements to your guests (and other servers)"
                     )
                     await db.host_threads.insert_one({
                         "host_id": int(interaction.user.id),
@@ -1043,7 +1043,7 @@ async def handle_global_ping(interaction: discord.Interaction, region: str, wher
                 else:
                     # Only save relay threads from other guilds
                     await thread.send(
-                        f"📥 Through this thread you can read announcements or message the host. Created on <t:{timestamp}:f>"
+                        f"Use this thread to read announcements or message the host"
                     )
                     relay_entries.append({
                         "host_id": int(interaction.user.id),
