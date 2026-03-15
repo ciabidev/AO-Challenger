@@ -500,7 +500,7 @@ async def cooldown_timer(user_id):
 allowed_mentions = discord.AllowedMentions(everyone=False, roles=False, users=True)
 
 
-async def send_webhook_message(user, content, channel, is_host, user_guild, ctx, attachments = None):
+async def send_webhook_message(user, content, channel, is_host, user_guild, origin_message, attachments = None):
     try:
         is_thread = isinstance(channel, discord.Thread)
         webhook_channel = channel.parent if is_thread else channel
@@ -529,7 +529,7 @@ async def send_webhook_message(user, content, channel, is_host, user_guild, ctx,
         ) 
     except Exception as e:
         if isinstance(e, discord.Forbidden):
-            await ctx.send("failed to publish this message. Check if I have the `Manage Threads` and `Send Messages in Threads` permissions.")
+            await origin_message.send("failed to publish this message. Check if I have the `Manage Threads` and `Send Messages in Threads` permissions.")
 
 
         
@@ -554,16 +554,30 @@ async def on_message(message: discord.Message):
 
     
     channel_id = int(message.channel.id)
-    user_id = int(message.author.id)    
+    user_id = int(message.author.id)
+    is_thread = isinstance(message.channel, discord.Thread)
+    host_entry = None
+    relay_entry = None
 
-    if user_id in rate_limited_users and rate_limited_users[user_id] == 5 and message.channel.id in thread_cache:
+    if is_thread:
+        # Always consult DB for thread identity (cache can be stale or empty).
+        host_entry = await db.host_threads.find_one({"host_thread_id": channel_id})
+        relay_entry = await db.relay_threads.find_one({"relay_thread_id": channel_id})
+
+        # If the thread isn't cached (e.g., archived or created before startup),
+        # cache it on demand once it's recognized.
+        if channel_id not in thread_cache and (host_entry or relay_entry):
+            thread_cache[channel_id] = message.channel
+
+
+    if user_id in rate_limited_users and rate_limited_users[user_id] == 5 and (channel_id in thread_cache or (is_thread and (host_entry or relay_entry))):
         # reply to user that they are rate limited ephemeral 
         msg = await message.reply(f"message not published. Please wait {rate_limited_users[user_id]} seconds before sending another message.")
         await asyncio.sleep(2)
         await msg.delete()
         return
 
-    elif message.channel.id in thread_cache:
+    elif is_thread and (channel_id in thread_cache or host_entry or relay_entry):
         if await is_banned_user(message.author.id):
             await message.delete()
             return
@@ -572,8 +586,6 @@ async def on_message(message: discord.Message):
         rate_limited_users[user_id] = COOLDOWN_DURATION
         asyncio.create_task(cooldown_timer(user_id))
 
-        relay_entry = await db.relay_threads.find_one({"relay_thread_id": channel_id})
-        host_entry = await db.host_threads.find_one({"host_thread_id": channel_id})
         is_host_of_this_thread = host_entry and host_entry.get("host_id") == user_id
 
         if host_entry and is_host_of_this_thread:
@@ -606,16 +618,25 @@ async def on_message(message: discord.Message):
                 if relay_thread:
                     logging.info("Relay thread found")
 
-                    if message.channel.permissions_for(message.guild.me).manage_threads:
-                        await asyncio.sleep(2)
-                        is_blocked = await is_blocked_user(message.author.name, relay_thread.guild.id)
-                        if is_blocked:
-                            await relay_thread.send(f"This host `{message.author.name}` is blocked from interacting with your server" 
-                                                    f"\n-# Please contact a server admin if you believe this is an error.")
-                            return
-                        await send_webhook_message(message.author, message.content, relay_thread, is_host=True, user_guild=message.guild, ctx=message, attachments=message.attachments)
-                        await relay_thread.edit(slowmode_delay=5)
-                        await host_thread.edit(slowmode_delay=5)
+                    await asyncio.sleep(2)
+                    is_blocked = await is_blocked_user(message.author.name, relay_thread.guild.id)
+                    if is_blocked:
+                        await relay_thread.send(
+                            f"This host `{message.author.name}` is blocked from interacting with your server"
+                            f"\n-# Please contact a server admin if you believe this is an error."
+                        )
+                        return
+                    await send_webhook_message(
+                        message.author,
+                        message.content,
+                        relay_thread,
+                        is_host=True,
+                        user_guild=message.guild,
+                        origin_message=message,
+                        attachments=message.attachments,
+                    )
+                    await relay_thread.edit(slowmode_delay=5)
+                    await host_thread.edit(slowmode_delay=5)
 
         # ─── Check if message is from a RELAY THREAD ────────────────────────────
         elif relay_entry and not is_host_of_this_thread:
@@ -630,17 +651,26 @@ async def on_message(message: discord.Message):
                 logger.info("host thread id found")
                 if host_thread and relay_thread_id != host_thread_id:
                     logger.info("host channel found")
-                    if message.channel.permissions_for(message.guild.me).manage_threads:
-                        await asyncio.sleep(2)
-                        is_blocked = await is_blocked_user(message.author.name, host_thread.guild.id)
-                        if is_blocked:
-                            await host_thread.send(f"blocked message from `{message.author.name}`" 
-                                                   f"\n-# Please contact a server admin if you believe this is an error.")
-                            return
+                    await asyncio.sleep(2)
+                    is_blocked = await is_blocked_user(message.author.name, host_thread.guild.id)
+                    if is_blocked:
+                        await host_thread.send(
+                            f"blocked message from `{message.author.name}`"
+                            f"\n-# Please contact a server admin if you believe this is an error."
+                        )
+                        return
 
-                        await send_webhook_message(message.author, message.content, host_thread, is_host=False, user_guild=message.guild, ctx=message, attachments=message.attachments)
-                        await relay_thread.edit(slowmode_delay=5)
-                        await host_thread.edit(slowmode_delay=5)
+                    await send_webhook_message(
+                        message.author,
+                        message.content,
+                        host_thread,
+                        is_host=False,
+                        user_guild=message.guild,
+                        origin_message=message,
+                        attachments=message.attachments,
+                    )
+                    await relay_thread.edit(slowmode_delay=5)
+                    await host_thread.edit(slowmode_delay=5)
 
         # append the user to the rate limited users list if they are not already there
         
@@ -652,7 +682,7 @@ async def on_message(message: discord.Message):
 
 @bot.command()
 async def debug_relays(ctx):
-    host_id = str(ctx.author.id)
+    host_id = int(ctx.author.id)
 
     host_thread = await db.host_threads.find_one({"host_id": host_id})
     if not host_thread:
@@ -926,8 +956,19 @@ async def handle_global_ping(interaction: discord.Interaction, region: str, wher
         return
     
     # Check bot permissions in the channel
-    if not global_pvp_channel.permissions_for(interaction.guild.me).send_messages or not global_pvp_channel.permissions_for(interaction.guild.me).read_message_history or not global_pvp_channel.permissions_for(interaction.guild.me).send_messages_in_threads or not global_pvp_channel.permissions_for(interaction.guild.me).manage_threads or not global_pvp_channel.permissions_for(interaction.guild.me).manage_roles:
-        await interaction.followup.send(f"I am missing one or more of the following permissions in <#{global_pvp_channel_id}> \n\n`Send Messages`, \n `Read Message History` - read GlobalPVP announcement threads, \n `Send Messages in Threads` - publish GlobalPVP announcement threads, \n `Manage Threads` and `Create Threads` - create and manage GlobalPVP announcement threads, \n `Manage Roles` and `Mention all roles` - Allows me to ping the set role when global pvp is used. \n `Manage Webhooks` - GlobalPVP threads use webhooks for cross-server communication. \n\n Please contact a server admin if this isn't intentional", ephemeral=True)
+    perms = global_pvp_channel.permissions_for(interaction.guild.me)
+    if not perms.send_messages or not perms.read_message_history or not perms.send_messages_in_threads or not perms.manage_threads or not perms.manage_roles or not perms.manage_webhooks:
+        await interaction.followup.send(
+            f"I am missing one or more of the following permissions in <#{global_pvp_channel_id}> \n\n"
+            f"`Send Messages`, \n"
+            f"`Read Message History` - read GlobalPVP announcement threads, \n"
+            f"`Send Messages in Threads` - publish GlobalPVP announcement threads, \n"
+            f"`Manage Threads` and `Create Threads` - create and manage GlobalPVP announcement threads, \n"
+            f"`Manage Roles` and `Mention all roles` - Allows me to ping the set role when global pvp is used. \n"
+            f"`Manage Webhooks` - GlobalPVP threads use webhooks for cross-server communication. \n\n"
+            f"Please contact a server admin if this isn't intentional",
+            ephemeral=True
+        )
         return
     
     host_id = int(interaction.user.id)
@@ -1050,18 +1091,18 @@ async def handle_global_ping(interaction: discord.Interaction, region: str, wher
                         "guild_id": guild_id,
                         "relay_thread_id": thread_id,
                     })
-
-                # Insert into relay_threads now that we have the host_thread_id
-                if host_thread_id:
-                    for entry in relay_entries:
-                        entry["host_thread_id"] = host_thread_id
-                        await db.relay_threads.insert_one(entry)
                 # edit the host sent message to include how many servers it was relayed to
             
         
         except Exception as e:
             logger.error(f"Error in globalpvp: {e}")
     
+    # Insert relay threads now that we have the host_thread_id (order-independent)
+    if host_thread_id and relay_entries:
+        for entry in relay_entries:
+            entry["host_thread_id"] = host_thread_id
+            await db.relay_threads.insert_one(entry)
+
     global_pvp_channel_id = await get_setting(interaction.guild.id, f"{region} Channel")
     global_pvp_threads_enabled = await get_toggle(interaction.guild.id, "global_pvp_threads_enabled")
     # Use followup.send() instead of response.send_message() since we already deferred the response
@@ -1102,6 +1143,35 @@ class GlobalPVPCommands(app_commands.Group):
         view.message = sent
         await view.update_embed()
 
+    @app_commands.command(name="repair", description="Reset GlobalPVP thread links for this server (rebuilds on next ping)")
+    @app_commands.checks.has_permissions(manage_channels=True)
+    async def globalpvprepair(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        guild_id = int(interaction.guild_id)
+
+        # Find host threads for this guild so we can clear linked relay entries and cache.
+        host_threads = await db.host_threads.find({"guild_id": guild_id}).to_list(None)
+        host_thread_ids = [int(h["host_thread_id"]) for h in host_threads]
+        host_ids = [int(h["host_id"]) for h in host_threads]
+
+        # Clear DB entries tied to this guild.
+        await db.host_threads.delete_many({"guild_id": guild_id})
+        if host_thread_ids:
+            await db.relay_threads.delete_many({"host_thread_id": {"$in": host_thread_ids}})
+        await db.relay_threads.delete_many({"guild_id": guild_id})
+        if host_ids:
+            await db.relay_threads.delete_many({"host_id": {"$in": host_ids}})
+
+        # Clear cached threads
+        for thread_id in host_thread_ids:
+            thread_cache.pop(thread_id, None)
+
+        await interaction.followup.send(
+            "✅ GlobalPVP thread links reset for this server. "
+            "Run a new `/globalpvp ping` to rebuild host/relay threads.",
+            ephemeral=True
+        )
 
     """"
     PING COMMAND
