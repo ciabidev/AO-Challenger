@@ -934,9 +934,9 @@ async def handle_global_ping(interaction: discord.Interaction, region: str, wher
     
     # Check cooldown
     user_id = interaction.user.id
-    if user_id in global_pvp_ping_last_run and datetime.datetime.now(datetime.timezone.utc) - global_pvp_ping_last_run[user_id] < datetime.timedelta(minutes=10):
+    if user_id in global_pvp_ping_last_run and datetime.datetime.now(datetime.timezone.utc) - global_pvp_ping_last_run[user_id] < datetime.timedelta(minutes=5):
         time_elapsed = datetime.datetime.now(datetime.timezone.utc) - global_pvp_ping_last_run[user_id]
-        remaining_seconds = (datetime.timedelta(minutes=10) - time_elapsed).total_seconds()
+        remaining_seconds = (datetime.timedelta(minutes=5) - time_elapsed).total_seconds()
         remaining_minutes = math.ceil(remaining_seconds / 60)
         await interaction.followup.send(f"❌ Please wait {remaining_minutes} minutes before pinging again.", ephemeral=True)
         return
