@@ -1020,7 +1020,7 @@ async def handle_global_ping(interaction: discord.Interaction, region: str, wher
 
             
             messagecontent = (
-                f"{"👑" if guild.id == interaction.guild.id else "📥"} <@{interaction.user.id}> is pvping at {where} {"😹😹😹" if interaction.user.id == 881885624678907934 else ""}. User/code: {code} {regional_role_mention} "
+                f"{"👑" if guild.id == interaction.guild.id else "📥"} <@{interaction.user.id}> is pvping at {where} {"😹😹😹" if interaction.user.id == 881885624678907934 else ""}. User/code is **{code}** {regional_role_mention} "
                 f"{extra_text}\n-# Use `/{region_shorthand_mapping[region]}-pvp` to ping this region (this pings other servers too)"
             )
 
@@ -1634,7 +1634,9 @@ async def findpvp(interaction: discord.Interaction, username: str, region: str, 
                 addedEmbed.add_field(name="Username", value=roblox_username, inline=False)
                 addedEmbed.add_field(name="Extra", value=extra, inline=False)
                 addedEmbed.add_field(name="Where", value=where, inline=False)
-                await interaction.response.send_message(embed=addedEmbed, view=view, ephemeral=True)
+                # followup with "user is looking for pvp!" message
+                await interaction.response.send(f"<@{interaction.user.id}> is looking for pvp! Region: {region}")
+                await interaction.followup.send_message(embed=addedEmbed, view=view, ephemeral=True)
             else:
                 await db.queue.update_one({"user_id": int(interaction.user.id)}, { # prevents players from editing others queue
                     "$set": {
