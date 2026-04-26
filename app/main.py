@@ -792,20 +792,34 @@ class GlobalSettingsView(discord.ui.View):
     # This limitation will be revisited when Discord increases the option limit
 
     def __init__(self, guild_id: int):
-        super().__init__()
+        super().__init__(timeout=600)
         self.regional_roles = "Not configured"  # default value
         self.host_roles = "Not configured, everyone by default"
 
         self.guild_id = guild_id
-        self.message = None  
-        asyncio.create_task(self.auto_reload())
+        self.message = None
+        self._auto_reload_active = True
+        self._auto_reload_task = asyncio.create_task(self.auto_reload())
+
+    def _stop_auto_reload(self):
+        self._auto_reload_active = False
+
+    async def on_timeout(self):
+        self._stop_auto_reload()
+        if self.message:
+            try:
+                await self.message.edit(view=None)
+            except Exception:
+                pass
 
 
     async def auto_reload(self):
-        while True:
+        while self._auto_reload_active:
             await asyncio.sleep(10)
             try:
-                await self.update_embed()
+                ok = await self.update_embed()
+                if not ok:
+                    break
             except Exception as e:
                 break
 
@@ -880,10 +894,19 @@ class GlobalSettingsView(discord.ui.View):
         if self.message:
             try:
                 await self.message.edit(embed=newembed, view=self)
+                return True
             except discord.HTTPException as e:
                 logger.error(f"Failed to edit settings message: {e}")
+                # Stop auto-reload to prevent webhook token spam on expired ephemerals
+                self._stop_auto_reload()
+                self.stop()
+                return False
             except Exception as e:
                 logger.error(f"Unexpected error editing settings message: {e}")
+                self._stop_auto_reload()
+                self.stop()
+                return False
+        return True
             
 """
 Autocomplete for in game locations
