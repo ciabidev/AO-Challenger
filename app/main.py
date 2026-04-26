@@ -6,6 +6,8 @@ import asyncio
 import datetime
 import math
 import aiohttp
+from pathlib import Path
+from urllib.parse import urlsplit
 from discord.ext import commands
 from discord import app_commands
 from discord import Interaction, ButtonStyle
@@ -50,7 +52,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Development mode flag - affects token and database selection
-load_dotenv()  # Load environment variables first before checking DEV_MODE
+dotenv_path = Path(__file__).with_name(".env")
+load_dotenv(dotenv_path=dotenv_path)  # Always load app/.env next to this file
 
 dev_mode = os.getenv("DEV_MODE", "false").lower() == "true"  # Default to false if not set
 
@@ -89,6 +92,22 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 # Set up MongoDB connection and database
 MONGO_URI = os.getenv("MONGO_URI")
+
+def redact_mongo_target(uri: str | None) -> str:
+    if not uri:
+        return "<missing>"
+    try:
+        parsed = urlsplit(uri)
+        host = parsed.hostname or "<unknown>"
+        if len(host) > 8:
+            host = f"{host[:4]}...{host[-4:]}"
+        return f"{parsed.scheme}://{host}"
+    except Exception:
+        return "<unparseable>"
+
+logging.info(f"Loaded env file: {dotenv_path}")
+logging.info(f"Mongo target: {redact_mongo_target(MONGO_URI)}")
+
 mongo_client = AsyncIOMotorClient(MONGO_URI)
 db = mongo_client["challenger"]  # Main database for production
 
@@ -411,10 +430,11 @@ async def ban_check(interaction: discord.Interaction) -> bool:
     Custom check for every command if the user is banned. Must be used at the top of every command
     """
     if await is_banned_user(interaction.user.id):  # make sure this is an async function if needed
-        await interaction.response.send_message(
-            "❌ You are banned from using the bot. Appeal here: https://tally.so/r/3X6yqV", # i need to add a "Reason: " section to this so the user knows why they were banned. will probably be in the bannned users db
-            ephemeral=True
-        )
+        message = "❌ You are banned from using the bot. Appeal here: https://tally.so/r/3X6yqV"
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
         return True  # block the command
     return False  # allow command
 
@@ -500,6 +520,35 @@ async def cooldown_timer(user_id):
 allowed_mentions = discord.AllowedMentions(everyone=False, roles=False, users=True)
 
 
+def contains_mass_mention(*values: str | None) -> bool:
+    """
+    Returns True when any provided value contains a mass-mention token.
+    """
+    for value in values:
+        if not value:
+            continue
+        lowered = value.lower()
+        if "@everyone" in lowered or "@here" in lowered:
+            return True
+    return False
+
+
+async def ensure_bot_ban(user_id: int) -> bool:
+    """
+    Insert a standard bot-wide ban record if the user is not already banned.
+    """
+    existing_ban = await db.bans.find_one({"user_id": int(user_id)})
+    if existing_ban:
+        return False
+
+    await db.bans.insert_one({
+        "user_id": int(user_id),
+        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+    })
+    logging.warning(f"Bot-banned user {user_id}")
+    return True
+
+
 async def send_webhook_message(user, content, channel, is_host, user_guild, origin_message, attachments = None):
     try:
         is_thread = isinstance(channel, discord.Thread)
@@ -525,7 +574,8 @@ async def send_webhook_message(user, content, channel, is_host, user_guild, orig
             username=username,
             files=files,
             avatar_url=user.display_avatar.url,
-            thread=channel if is_thread else discord.utils.MISSING
+            thread=channel if is_thread else discord.utils.MISSING,
+            allowed_mentions=allowed_mentions
         ) 
     except Exception as e:
         if isinstance(e, discord.Forbidden):
@@ -580,6 +630,19 @@ async def on_message(message: discord.Message):
     elif is_thread and (channel_id in thread_cache or host_entry or relay_entry):
         if await is_banned_user(message.author.id):
             await message.delete()
+            return
+
+        if contains_mass_mention(message.content):
+            await ensure_bot_ban(message.author.id)
+            logging.warning(f"Mass-mention attempt in relay thread by user {message.author.id}")
+            try:
+                await message.delete()
+            except discord.HTTPException:
+                pass
+            await message.channel.send(
+                f"<@{message.author.id}> has been bot-banned for attempting to ping `@everyone` or `@here`.",
+                allowed_mentions=allowed_mentions
+            )
             return
         
         # ─── Check if message is from a HOST THREAD ─────────────────────────────
@@ -941,6 +1004,15 @@ async def handle_global_ping(interaction: discord.Interaction, region: str, wher
     global global_pvp_ping_last_run
     
     if await ban_check(interaction):
+        return
+
+    if contains_mass_mention(code, extra):
+        await ensure_bot_ban(interaction.user.id)
+        logging.warning(f"Mass-mention attempt in global PVP command by user {interaction.user.id}")
+        await interaction.followup.send(
+            "❌ You have been banned from using the bot for attempting to ping `@everyone` or `@here`.",
+            ephemeral=True
+        )
         return
     
     # Validate guild context
