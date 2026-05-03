@@ -1028,11 +1028,11 @@ async def handle_global_ping(interaction: discord.Interaction, region: str, wher
             
             # Check if we should send to this guild
             if relay_receive_pings_enabled or str(guild.id) == str(interaction.guild.id):
-                sent_msg = await global_pvp_channel.send(messagecontent, allowed_mentions=discord.AllowedMentions(everyone=False, roles=True, users=True)) # make sure roles is set to true so it can ping the region role
+                sent_msg = await global_pvp_channel.send(messagecontent, allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=True)) # make sure roles is set to true so it can ping the region role
                 if guild.id == interaction.guild.id:
                     host_sent_msg = sent_msg
             elif guild.id == interaction.guild.id: # host server includes the host server so we have to check for this. If we don't check for this, the message wont be announced at all if receive pings is disabled on the relay's server.
-                sent_msg = await global_pvp_channel.send(messagecontent, allowed_mentions=discord.AllowedMentions(everyone=False, roles=True, users=True))
+                sent_msg = await global_pvp_channel.send(messagecontent, allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=True))
 
  
             
