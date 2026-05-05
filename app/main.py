@@ -93,22 +93,11 @@ from motor.motor_asyncio import AsyncIOMotorClient
 # Set up MongoDB connection and database
 MONGO_URI = os.getenv("MONGO_URI")
 
-def redact_mongo_target(uri: str | None) -> str:
-    if not uri:
-        return "<missing>"
-    try:
-        parsed = urlsplit(uri)
-        host = parsed.hostname or "<unknown>"
-        if len(host) > 8:
-            host = f"{host[:4]}...{host[-4:]}"
-        return f"{parsed.scheme}://{host}"
-    except Exception:
-        return "<unparseable>"
 
-logging.info(f"Loaded env file: {dotenv_path}")
-logging.info(f"Mongo target: {redact_mongo_target(MONGO_URI)}")
 
 mongo_client = AsyncIOMotorClient(MONGO_URI)
+if mongo_client: 
+    logging.info(f"Connected to MongoDB")
 db = mongo_client["challenger"]  # Main database for production
 
 if dev_mode:
@@ -156,6 +145,7 @@ async def migrate_cross_server_pvp_settings():
     except Exception as e:
         logging.error(f"❌ Migration error: {e}")
 
+
 @bot.event
 async def on_ready():
     """
@@ -186,11 +176,12 @@ async def on_ready():
 
     logging.info(f"Cached {len(thread_cache)} possible pvp channels/threads")
 
-    # remove all queue entries on start
-    await db.queue.delete_many({})
-    
-    # Run migration for cross-server PVP settings
-    await migrate_cross_server_pvp_settings()
+    try:
+        # remove all queue entries on start
+        await db.queue.delete_many({})
+
+    except Exception as e:
+        logging.exception("Startup database tasks failed: %s", e)
 
 """
 
@@ -1123,11 +1114,11 @@ async def handle_global_ping(interaction: discord.Interaction, region: str, wher
             
             # Check if we should send to this guild
             if relay_receive_pings_enabled or str(guild.id) == str(interaction.guild.id):
-                sent_msg = await global_pvp_channel.send(messagecontent, allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=True)) # make sure roles is set to true so it can ping the region role
+                sent_msg = await global_pvp_channel.send(messagecontent, allowed_mentions=discord.AllowedMentions(everyone=False, roles=True, users=True)) # make sure roles is set to true so it can ping the region role
                 if guild.id == interaction.guild.id:
                     host_sent_msg = sent_msg
             elif guild.id == interaction.guild.id: # host server includes the host server so we have to check for this. If we don't check for this, the message wont be announced at all if receive pings is disabled on the relay's server.
-                sent_msg = await global_pvp_channel.send(messagecontent, allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=True))
+                sent_msg = await global_pvp_channel.send(messagecontent, allowed_mentions=discord.AllowedMentions(everyone=False, roles=True, users=True))
 
  
             
@@ -1994,6 +1985,44 @@ async def afpvp(
     await handle_global_ping(interaction, "Africa", where, code, extra)
 # register globalpvp class
 bot.tree.add_command(GlobalPVPCommands(name="globalpvp", description="global/public pvp management"))
+
+# status
+# send a test request to mongodb
+@bot.tree.command(name="status", description="Check bot and MongoDB status")
+async def status(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+
+    try:
+        mongo_started = datetime.datetime.now(datetime.timezone.utc)
+        ping_result = await db.command("ping")
+        mongo_latency_ms = int(
+            (datetime.datetime.now(datetime.timezone.utc) - mongo_started).total_seconds() * 1000
+        )
+
+        status_embed = discord.Embed(
+            title="AO Challenger Status",
+            color=discord.Color.green(),
+        )
+        status_embed.add_field(name="Bot", value="Online", inline=True)
+        status_embed.add_field(name="MongoDB", value="Connected", inline=True)
+        status_embed.add_field(name="Mongo Ping", value=f"{mongo_latency_ms} ms", inline=True)
+        status_embed.add_field(name="Database", value=db.name, inline=True)
+        status_embed.add_field(name="Response", value=str(ping_result.get("ok", "unknown")), inline=True)
+        status_embed.add_field(name="Gateway Ping", value=f"{round(bot.latency * 1000)} ms", inline=True)
+
+        await interaction.followup.send(embed=status_embed, ephemeral=True)
+    except Exception as e:
+        status_embed = discord.Embed(
+            title="AO Challenger Status",
+            description="MongoDB test request failed.",
+            color=discord.Color.red(),
+        )
+        status_embed.add_field(name="Bot", value="Online", inline=True)
+        status_embed.add_field(name="MongoDB", value="Error", inline=True)
+        status_embed.add_field(name="Details", value=f"`{str(e)[:1000]}`", inline=False)
+
+        await interaction.followup.send(embed=status_embed, ephemeral=True)
+
 def run_bot():
     bot.run(token) 
 
