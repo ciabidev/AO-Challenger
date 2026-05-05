@@ -6,6 +6,7 @@ import asyncio
 import datetime
 import math
 import aiohttp
+import re
 from pathlib import Path
 from urllib.parse import urlsplit
 from discord.ext import commands
@@ -508,7 +509,9 @@ async def cooldown_timer(user_id):
         await asyncio.sleep(1)
     rate_limited_users.pop(user_id, None)
 
-allowed_mentions = discord.AllowedMentions(everyone=False, roles=False, users=True)
+no_mentions = discord.AllowedMentions(everyone=False, roles=False, users=False)
+ROLE_MENTION_RE = re.compile(r"<@&(\d+)>")
+MASS_MENTION_RE = re.compile(r"@(everyone|here)", re.IGNORECASE)
 
 
 def contains_mass_mention(*values: str | None) -> bool:
@@ -522,6 +525,56 @@ def contains_mass_mention(*values: str | None) -> bool:
         if "@everyone" in lowered or "@here" in lowered:
             return True
     return False
+
+
+def stringify_disallowed_role_mentions(
+    content: str | None,
+    guild: discord.Guild | None,
+    allowed_role_ids: set[int] | None = None,
+) -> str | None:
+    """
+    Convert mass mentions and disallowed role mentions into plain text.
+    Allowed role mentions are preserved so they can still ping when needed.
+    """
+    if content is None:
+        return None
+
+    allowed_role_ids = {int(role_id) for role_id in (allowed_role_ids or set())}
+
+    def replace_mass(match: re.Match[str]) -> str:
+        return f"@\u200b{match.group(1)}"
+
+    def replace_role(match: re.Match[str]) -> str:
+        role_id = int(match.group(1))
+        if role_id in allowed_role_ids:
+            return match.group(0)
+
+        role = guild.get_role(role_id) if guild else None
+        role_name = role.name if role else f"deleted-role-{role_id}"
+        return f"@\u200b{role_name}"
+
+    sanitized = MASS_MENTION_RE.sub(replace_mass, content)
+    return ROLE_MENTION_RE.sub(replace_role, sanitized)
+
+
+async def get_pvp_role_ids(guild_id: int) -> set[int]:
+    """
+    Returns every region role configured for a guild.
+    """
+    role_ids = set()
+    for region in regions:
+        role_id = await get_setting(guild_id, f"{region} Role")
+        if role_id:
+            role_ids.add(int(role_id))
+    return role_ids
+
+
+def build_pvp_allowed_mentions(allowed_role_ids: set[int]) -> discord.AllowedMentions:
+    """
+    Allow user mentions plus only the explicitly configured PVP roles.
+    """
+    allowed_roles = [discord.Object(id=role_id) for role_id in sorted(allowed_role_ids)]
+    return discord.AllowedMentions(everyone=False, roles=allowed_roles, users=True)
 
 
 async def ensure_bot_ban(user_id: int) -> bool:
@@ -566,11 +619,13 @@ async def send_webhook_message(user, content, channel, is_host, user_guild, orig
             files=files,
             avatar_url=user.display_avatar.url,
             thread=channel if is_thread else discord.utils.MISSING,
-            allowed_mentions=allowed_mentions
+            allowed_mentions=no_mentions
         ) 
     except Exception as e:
         if isinstance(e, discord.Forbidden):
-            await origin_message.send("failed to publish this message. Check if I have the `Manage Threads` and `Send Messages in Threads` permissions.")
+            logger.error("Failed to send relay webhook to channel %s: %s", getattr(channel, "id", "unknown"), e)
+            return
+        logger.exception("Unexpected error while sending relay webhook: %s", e)
 
 
         
@@ -610,6 +665,8 @@ async def on_message(message: discord.Message):
         if channel_id not in thread_cache and (host_entry or relay_entry):
             thread_cache[channel_id] = message.channel
 
+    is_host_of_this_thread = bool(host_entry and host_entry.get("host_id") == user_id)
+
 
     if user_id in rate_limited_users and rate_limited_users[user_id] == 5 and (channel_id in thread_cache or (is_thread and (host_entry or relay_entry))):
         # reply to user that they are rate limited ephemeral 
@@ -622,25 +679,9 @@ async def on_message(message: discord.Message):
         if await is_banned_user(message.author.id):
             await message.delete()
             return
-
-        if contains_mass_mention(message.content):
-            await ensure_bot_ban(message.author.id)
-            logging.warning(f"Mass-mention attempt in relay thread by user {message.author.id}")
-            try:
-                await message.delete()
-            except discord.HTTPException:
-                pass
-            await message.channel.send(
-                f"<@{message.author.id}> has been bot-banned for attempting to ping `@everyone` or `@here`.",
-                allowed_mentions=allowed_mentions
-            )
-            return
-        
         # ─── Check if message is from a HOST THREAD ─────────────────────────────
         rate_limited_users[user_id] = COOLDOWN_DURATION
         asyncio.create_task(cooldown_timer(user_id))
-
-        is_host_of_this_thread = host_entry and host_entry.get("host_id") == user_id
 
         if host_entry and is_host_of_this_thread:
             logging.info("message is from a host thread")
@@ -682,7 +723,7 @@ async def on_message(message: discord.Message):
                         return
                     await send_webhook_message(
                         message.author,
-                        message.content,
+                        stringify_disallowed_role_mentions(message.content, relay_thread.guild),
                         relay_thread,
                         is_host=True,
                         user_guild=message.guild,
@@ -716,7 +757,7 @@ async def on_message(message: discord.Message):
 
                     await send_webhook_message(
                         message.author,
-                        message.content,
+                        stringify_disallowed_role_mentions(message.content, host_thread.guild),
                         host_thread,
                         is_host=False,
                         user_guild=message.guild,
@@ -996,16 +1037,6 @@ async def handle_global_ping(interaction: discord.Interaction, region: str, wher
     
     if await ban_check(interaction):
         return
-
-    if contains_mass_mention(code, extra):
-        await ensure_bot_ban(interaction.user.id)
-        logging.warning(f"Mass-mention attempt in global PVP command by user {interaction.user.id}")
-        await interaction.followup.send(
-            "❌ You have been banned from using the bot for attempting to ping `@everyone` or `@here`.",
-            ephemeral=True
-        )
-        return
-    
     # Validate guild context
     if not interaction.guild.id:
         await interaction.followup.send(f"❌ this command is not available in DMs", ephemeral=True)
@@ -1097,16 +1128,21 @@ async def handle_global_ping(interaction: discord.Interaction, region: str, wher
     
             # Get regional role config
             regional_role_id = await get_setting(guild.id, f"{region} Role")
+            allowed_role_ids = await get_pvp_role_ids(guild.id)
+            allowed_mentions_for_pvp = build_pvp_allowed_mentions(allowed_role_ids)
+            safe_where = stringify_disallowed_role_mentions(where, guild, allowed_role_ids) or where
+            safe_code = stringify_disallowed_role_mentions(code, guild, allowed_role_ids) or code
+            safe_extra = stringify_disallowed_role_mentions(extra, guild, allowed_role_ids)
 
             regional_role_mention = f"(<@&{regional_role_id}>)" if regional_role_id else f"({region})\n-# No regional role set for {region}. Please contact a server admin if this isn't intentional"
-            extra_text = f"\nExtra info: {extra}" if extra else ""
+            extra_text = f"\nExtra info: {safe_extra}" if safe_extra else ""
            
             if relay_receive_pings_enabled and guild.id != interaction.guild.id:
                 server_count += 1
 
             
             messagecontent = (
-                f"{"👑" if guild.id == interaction.guild.id else "📥"} <@{interaction.user.id}> is pvping at {where} {"😹😹😹" if interaction.user.id == 881885624678907934 else ""}. User/code is **{code}** {regional_role_mention} "
+                f"{"👑" if guild.id == interaction.guild.id else "📥"} <@{interaction.user.id}> is pvping at {safe_where} {"😹😹😹" if interaction.user.id == 881885624678907934 else ""}. User/code is **{safe_code}** {regional_role_mention} "
                 f"{extra_text}\n-# Use `/{region_shorthand_mapping[region]}-pvp` to ping this region (this pings other servers too)"
             )
 
@@ -1114,11 +1150,11 @@ async def handle_global_ping(interaction: discord.Interaction, region: str, wher
             
             # Check if we should send to this guild
             if relay_receive_pings_enabled or str(guild.id) == str(interaction.guild.id):
-                sent_msg = await global_pvp_channel.send(messagecontent, allowed_mentions=discord.AllowedMentions(everyone=False, roles=True, users=True)) # make sure roles is set to true so it can ping the region role
+                sent_msg = await global_pvp_channel.send(messagecontent, allowed_mentions=allowed_mentions_for_pvp)
                 if guild.id == interaction.guild.id:
                     host_sent_msg = sent_msg
             elif guild.id == interaction.guild.id: # host server includes the host server so we have to check for this. If we don't check for this, the message wont be announced at all if receive pings is disabled on the relay's server.
-                sent_msg = await global_pvp_channel.send(messagecontent, allowed_mentions=discord.AllowedMentions(everyone=False, roles=True, users=True))
+                sent_msg = await global_pvp_channel.send(messagecontent, allowed_mentions=allowed_mentions_for_pvp)
 
  
             
