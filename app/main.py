@@ -577,6 +577,14 @@ def build_pvp_allowed_mentions(allowed_role_ids: set[int]) -> discord.AllowedMen
     return discord.AllowedMentions(everyone=False, roles=allowed_roles, users=True)
 
 
+def format_missing_permissions(required_permissions: list[tuple[str, bool]]) -> str:
+    """
+    Build a readable list of permissions that failed a channel permission check.
+    """
+    missing = [name for name, has_permission in required_permissions if not has_permission]
+    return "\n".join(f"- `{name}`" for name in missing)
+
+
 async def ensure_bot_ban(user_id: int) -> bool:
     """
     Insert a standard bot-wide ban record if the user is not already banned.
@@ -1071,18 +1079,44 @@ async def handle_global_ping(interaction: discord.Interaction, region: str, wher
     if not regional_role_id:
         await interaction.followup.send(f"❌ no regional role set for {region}. Please contact a server admin.", ephemeral=True)
         return
+    regional_role = interaction.guild.get_role(int(regional_role_id))
+    if not regional_role:
+        await interaction.followup.send(f"❌ the configured regional role for {region} no longer exists. Please tell an admin to reassign it with `/globalpvp assignregions`.", ephemeral=True)
+        return
     
+    global_pvp_enabled = await get_toggle(interaction.guild.id, "global_pvp_enabled")
+    if not global_pvp_enabled:
+        await interaction.followup.send(f"❌ Global PVP is disabled for this server. Please contact a server admin if you believe this is an error.")
+        return
+
+    host_send_pings_enabled = await get_toggle(interaction.guild.id, "send_pings_to_other_servers")
+    host_global_pvp_threads_enabled = await get_toggle(interaction.guild.id, "global_pvp_threads_enabled")
+
     # Check bot permissions in the channel
-    perms = global_pvp_channel.permissions_for(interaction.guild.me)
-    if not perms.send_messages or not perms.read_message_history or not perms.send_messages_in_threads or not perms.manage_threads or not perms.manage_roles or not perms.manage_webhooks:
+    bot_member = interaction.guild.me or interaction.guild.get_member(bot.user.id)
+    perms = global_pvp_channel.permissions_for(bot_member)
+    required_permissions = [
+        ("View Channel", perms.view_channel),
+        ("Send Messages", perms.send_messages),
+        ("Read Message History", perms.read_message_history),
+        ("Mention @everyone, @here, and All Roles", perms.mention_everyone),
+    ]
+
+    if host_global_pvp_threads_enabled:
+        required_permissions.extend([
+            ("Create Public Threads", perms.create_public_threads),
+            ("Send Messages in Threads", perms.send_messages_in_threads),
+            ("Manage Threads", perms.manage_threads),
+            ("Manage Webhooks", perms.manage_webhooks),
+        ])
+
+    missing_permissions = format_missing_permissions(required_permissions)
+    if missing_permissions:
         await interaction.followup.send(
-            f"I am missing one or more of the following permissions in <#{global_pvp_channel_id}> \n\n"
-            f"`Send Messages`, \n"
-            f"`Read Message History` - read GlobalPVP announcement threads, \n"
-            f"`Send Messages in Threads` - publish GlobalPVP announcement threads, \n"
-            f"`Manage Threads` and `Create Threads` - create and manage GlobalPVP announcement threads, \n"
-            f"`Manage Roles` and `Mention all roles` - Allows me to ping the set role when global pvp is used. \n"
-            f"`Manage Webhooks` - GlobalPVP threads use webhooks for cross-server communication. \n\n"
+            f"I am missing the following permission(s) in <#{global_pvp_channel_id}>:\n\n"
+            f"{missing_permissions}\n\n"
+            f"`Mention @everyone, @here, and All Roles` is required so I can ping regional roles consistently. "
+            f"Thread and webhook permissions are only required when Global PVP Threads are enabled.\n\n"
             f"Please contact a server admin if this isn't intentional",
             ephemeral=True
         )
@@ -1093,14 +1127,9 @@ async def handle_global_ping(interaction: discord.Interaction, region: str, wher
     host_sent_msg = None
     relay_entries = []
     server_count = 0
-    global_pvp_enabled = await get_toggle(interaction.guild.id, "global_pvp_enabled")
-    if not global_pvp_enabled:
-        await interaction.followup.send(f"❌ Global PVP is disabled for this server. Please contact a server admin if you believe this is an error.")
-        return  
     for guild in bot.guilds:
         try:
             # check if sending to other servers is enabled for the host guild
-            host_send_pings_enabled = await get_toggle(interaction.guild.id, "send_pings_to_other_servers")
             relay_receive_pings_enabled = await get_toggle(guild.id, "receive_pings_from_other_servers")
 
             if not host_send_pings_enabled and guild.id != interaction.guild_id:
@@ -1123,7 +1152,6 @@ async def handle_global_ping(interaction: discord.Interaction, region: str, wher
                 continue
             
             # check if global pvp threads are enabled for both the host and relay guilds
-            host_global_pvp_threads_enabled = await get_toggle(interaction.guild.id, "global_pvp_threads_enabled")
             relay_global_pvp_threads_enabled = await get_toggle(guild.id, "global_pvp_threads_enabled")
     
             # Get regional role config
